@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1d4ed8;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#blueGrad)"/>
+  
+  <!-- Camera Body -->
+  <rect x="106" y="166" width="300" height="220" rx="30" fill="white" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.1))"/>
+  
+  <!-- Viewfinder hump -->
+  <path d="M196 166 L216 136 H296 L316 166 Z" fill="white"/>
+  
+  <!-- Lens Outer -->
+  <circle cx="256" cy="276" r="75" fill="#eff6ff"/>
+  <circle cx="256" cy="276" r="65" fill="#2563eb"/>
+  
+  <!-- Lens Inner / Aperture -->
+  <circle cx="256" cy="276" r="25" fill="#1d4ed8"/>
+  <circle cx="270" cy="265" r="8" fill="white" opacity="0.5"/>
+  
+  <!-- Flash / Sensor -->
+  <circle cx="360" cy="200" r="15" fill="#fbbf24"/>
+  
+  <!-- Sparkles (AI Magic) -->
+  <g fill="#fbbf24">
+    <path d="M430 90 L440 115 L465 120 L445 140 L450 165 L430 150 L410 165 L415 140 L395 120 L420 115 Z"/>
+    <circle cx="470" cy="80" r="8" opacity="0.8"/>
+    <circle cx="390" cy="80" r="5" opacity="0.6"/>
+  </g>
+</svg>

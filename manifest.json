@@ -1,0 +1,49 @@
+{
+  "name": "الاستوديو الذكي للتصوير",
+  "short_name": "الاستوديو الذكي",
+  "description": "حوّل صورك العادية إلى صور رسمية احترافية للمستندات وجوازات السفر والملفات الشخصية باستخدام الذكاء الاصطناعي.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
+  "orientation": "portrait",
+  "theme_color": "#2563eb",
+  "background_color": "#ffffff",
+  "categories": ["productivity", "utilities", "photography", "photo"],
+  "lang": "ar",
+  "dir": "rtl",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://images.unsplash.com/photo-1616593871239-2a441e97d156?q=80&w=1080&auto=format&fit=crop",
+      "sizes": "1080x1920",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Home Screen Mobile"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1616593871239-2a441e97d156?q=80&w=1920&auto=format&fit=crop",
+      "sizes": "1920x1080",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Desktop Studio Mode"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "التقاط صورة",
+      "short_name": "كاميرا",
+      "url": "/",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192", "type": "image/svg+xml" }]
+    }
+  ]
+}
