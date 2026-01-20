@@ -56,11 +56,12 @@ export const transformImage = async (
   if (onProgress) onProgress("جاري تجهيز الصورة...");
 
   // 1. ROBUST API KEY RETRIEVAL
+  // Check multiple sources for the key to ensure it works in Vite dev and Vercel prod
   const apiKey = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
 
   if (!apiKey || apiKey === 'undefined' || apiKey === '') {
-    console.error("API Key is missing.");
-    throw new Error("مفتاح API مفقود. يرجى التأكد من إعدادات المتغيرات البيئية.");
+    console.error("DEBUG: API Key is missing in environment variables.");
+    throw new Error("مفتاح API مفقود. يرجى إضافة VITE_API_KEY في إعدادات Vercel.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -71,7 +72,6 @@ export const transformImage = async (
   
   try {
     // Increased quality and size (1536px) for better identity preservation in wide/general shots
-    // This helps the model see faces clearly even if the user uploads a full-body photo
     processedBase64 = await compressImage(base64Image, 1536, 0.85);
   } catch (e) {
     console.warn("Image compression failed, using original", e);
@@ -168,7 +168,7 @@ export const transformImage = async (
 
   const requestId = Math.random().toString(36).substring(7);
 
-  // Refined Prompt for "General Photo" handling with explicit CROP & EXTEND instructions
+  // Refined Prompt
   const prompt = `
     ROLE: Expert Professional ID Photo Editor & Retoucher.
     REQUEST ID: ${requestId}
@@ -226,13 +226,13 @@ export const transformImage = async (
   ];
 
   let lastError: any = null;
-  const MAX_RETRIES = 2; 
+  const MAX_RETRIES = 3; 
   
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       if (onProgress) {
         if (attempt === 0) onProgress("جاري تحليل الصورة واستخراج الشخص...");
-        else onProgress(`محاولة ${attempt + 1} من ${MAX_RETRIES + 1}...`);
+        else onProgress(`محاولة الاتصال ${attempt + 1}...`);
       }
 
       const response = await ai.models.generateContent({
@@ -264,18 +264,32 @@ export const transformImage = async (
       throw new Error("لم يتم إرجاع أي بيانات من النموذج.");
 
     } catch (error: any) {
+      // Detailed Logging for Debugging in Vercel
       console.error(`Gemini API Error (Attempt ${attempt + 1}):`, error);
+      console.error("Error Details:", {
+         message: error.message,
+         status: error.status,
+         statusText: error.statusText,
+         headers: error.headers
+      });
+
       lastError = error;
       
       const errorMsg = (error.message || error.toString()).toLowerCase();
       
-      // Fatal errors - do not retry
+      // 1. Check for Domain/Key Restrictions (403/400)
+      if (errorMsg.includes("403") || errorMsg.includes("check your api key")) {
+          throw new Error("⛔ خطأ في الصلاحيات: تأكد من أن مفتاح API ليس مقيداً بـ localhost وأنه يعمل مع نطاق vercel.app في Google Cloud Console.");
+      }
+
+      // 2. Fatal errors - do not retry
       if (errorMsg.includes("400") || errorMsg.includes("invalid argument") || errorMsg.includes("refusal") || errorMsg.includes("safety")) {
          throw new Error("⚠️ تعذر معالجة الصورة. قد تكون غير واضحة أو تخالف سياسات الأمان.");
       }
       
-      // Retryable errors
+      // 3. Rate Limits / Server Busy (Retryable)
       if (attempt < MAX_RETRIES) {
+        // Backoff: 2s, 4s, 8s
         const waitTimeMs = 2000 * Math.pow(2, attempt); 
         await delay(waitTimeMs);
         continue;
@@ -286,9 +300,10 @@ export const transformImage = async (
   // Final Error Handling
   const finalMsg = (lastError.message || lastError.toString()).toLowerCase();
   
-  if (finalMsg.includes("429") || finalMsg.includes("quota")) {
-    throw new Error("⚠️ الخادم مشغول (429). يرجى المحاولة بعد قليل.");
+  if (finalMsg.includes("429") || finalMsg.includes("quota") || finalMsg.includes("resource has been exhausted")) {
+    throw new Error("⏳ الخادم مشغول جداً حالياً (تجاوز الحد المجاني). يرجى الانتظار دقيقة والمحاولة مجدداً.");
   }
   
-  throw new Error(`فشل المعالجة: ${lastError.message || "خطأ غير معروف"}`);
+  // Generic fallback
+  throw new Error(`فشل المعالجة: ${lastError.message || "خطأ في الاتصال بالخادم"}`);
 };
