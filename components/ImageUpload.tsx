@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { UploadCloud, Image as ImageIcon } from 'lucide-react';
+import { UploadCloud, Image as ImageIcon, Sparkles } from 'lucide-react';
 
 interface ImageUploadProps {
   onImageSelected: (base64: string) => void;
@@ -41,14 +41,14 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onImageSelected }) => {
         />
       </label>
       
-      <div className="mt-4 flex gap-4 text-sm text-gray-600 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-100 dark:border-blue-800">
+      <div className="mt-4 flex flex-col sm:flex-row gap-4 text-sm text-gray-600 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-100 dark:border-blue-800">
         <div className="flex items-center gap-2">
-            <ImageIcon size={16} />
-            <span>يفضل صورة واضحة الوجه</span>
+            <ImageIcon size={16} className="text-blue-500 shrink-0" />
+            <span>يمكن استخدام صور عادية، سيلفي، أو صور كاملة</span>
         </div>
         <div className="flex items-center gap-2">
-            <ImageIcon size={16} />
-            <span>إضاءة جيدة</span>
+            <Sparkles size={16} className="text-yellow-500 shrink-0" />
+            <span>سيقوم الذكاء الاصطناعي بقص الصورة وإزالة الخلفية تلقائياً</span>
         </div>
       </div>
     </div>

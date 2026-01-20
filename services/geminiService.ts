@@ -4,8 +4,9 @@ import { GenerationConfig, ClothingStyle, Country } from "../types";
 // Helper: Delay function for retry logic
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper: Aggressive compression to save tokens
-const compressImage = (base64Str: string, maxWidth = 512, quality = 0.6): Promise<string> => {
+// Helper: Aggressive compression to save tokens, but keep enough detail for faces
+// Updated default to higher res to allow better face detection in "general" (wide) photos
+const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.8): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
@@ -15,9 +16,16 @@ const compressImage = (base64Str: string, maxWidth = 512, quality = 0.6): Promis
       let width = img.width;
       let height = img.height;
 
+      // Maintain aspect ratio
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width);
         width = maxWidth;
+      }
+      
+      // Also check max height to prevent super tall images
+      if (height > maxWidth) {
+         width = Math.round((width * maxWidth) / height);
+         height = maxWidth;
       }
 
       canvas.width = width;
@@ -29,6 +37,7 @@ const compressImage = (base64Str: string, maxWidth = 512, quality = 0.6): Promis
         return;
       }
       
+      // Fill white background to handle transparent PNGs correctly
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
@@ -44,13 +53,14 @@ export const transformImage = async (
   config: GenerationConfig,
   onProgress?: (message: string) => void
 ): Promise<string> => {
+  if (onProgress) onProgress("جاري تجهيز الصورة...");
+
   // 1. ROBUST API KEY RETRIEVAL
-  // Try process.env first (injected by Vite define), then import.meta.env as fallback
   const apiKey = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
 
   if (!apiKey || apiKey === 'undefined' || apiKey === '') {
-    console.error("API Key is missing in build.");
-    throw new Error("مفتاح API مفقود. يرجى التأكد من إعدادات المتغيرات البيئية (Environment Variables) في الاستضافة.");
+    console.error("API Key is missing.");
+    throw new Error("مفتاح API مفقود. يرجى التأكد من إعدادات المتغيرات البيئية.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -60,7 +70,9 @@ export const transformImage = async (
   let mimeType = 'image/jpeg';
   
   try {
-    processedBase64 = await compressImage(base64Image, 512, 0.6);
+    // Increased quality and size (1536px) for better identity preservation in wide/general shots
+    // This helps the model see faces clearly even if the user uploads a full-body photo
+    processedBase64 = await compressImage(base64Image, 1536, 0.85);
   } catch (e) {
     console.warn("Image compression failed, using original", e);
     const match = base64Image.match(/^data:(image\/[a-zA-Z]+);base64,/);
@@ -106,11 +118,8 @@ export const transformImage = async (
   let clothingDesc = getStyleDescription(config.style);
   let extraInstructions = "";
   let parts: any[] = [];
-  let strictnessLevel = "HIGH";
-
+  
   if (config.category === 'military') {
-    strictnessLevel = "EXTREME"; 
-    
     const countryDetails = getCountryMilitaryDetails(config.militaryOptions.country);
     
     if (config.style === 'military_camouflage') {
@@ -122,11 +131,11 @@ export const transformImage = async (
     if (config.militaryOptions.hasBeret) {
       if (config.militaryOptions.beretImage) {
         let beretBase64 = config.militaryOptions.beretImage;
-        try { beretBase64 = await compressImage(beretBase64, 256, 0.6); } catch(e) {}
+        try { beretBase64 = await compressImage(beretBase64, 256, 0.7); } catch(e) {}
         const cleanBeret = beretBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
 
         extraInstructions += " HEADWEAR COMPOSITING: I have provided an image of a specific MILITARY BERET/CAP. You MUST place this exact beret on the subject's head. IMPORTANT: Place the beret ON TOP of the existing head/hairline. DO NOT change the shape of the subject's forehead or skull to fit the beret.";
-        parts.push({ text: "This is the image of the Beret/Cap to use:" });
+        parts.push({ text: "Reference Image 1 (Beret/Cap to use):" });
         parts.push({ inlineData: { mimeType: 'image/jpeg', data: cleanBeret } });
       } else {
         extraInstructions += " HEADWEAR: The subject MUST be wearing a military beret on their head. The beret color and insignia should match the specified country's army style. Ensure the beret sits naturally without cutting off the forehead.";
@@ -138,7 +147,7 @@ export const transformImage = async (
     if (config.militaryOptions.hasRank && config.militaryOptions.rankImage) {
       let rankBase64 = config.militaryOptions.rankImage;
       try {
-         rankBase64 = await compressImage(rankBase64, 256, 0.6); 
+         rankBase64 = await compressImage(rankBase64, 256, 0.7); 
       } catch (e) {}
       
       const cleanRankBase64 = rankBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
@@ -146,7 +155,7 @@ export const transformImage = async (
       extraInstructions += " RANK INSIGNIA: I have provided a second image which is a military RANK badge. You MUST composite this specific rank badge onto the shoulders or chest of the generated uniform in a realistic way.";
       
       parts.push({
-        text: "This is the image of the Rank Insignia:",
+        text: "Reference Image 2 (Rank Insignia):",
       });
       parts.push({
         inlineData: {
@@ -157,39 +166,52 @@ export const transformImage = async (
     }
   }
 
-  // Add random ID to prompt to prevent any aggressive caching on Google's side
   const requestId = Math.random().toString(36).substring(7);
 
+  // Refined Prompt for "General Photo" handling with explicit CROP & EXTEND instructions
   const prompt = `
-    TASK: Create a professional formal ID/Passport photo from the provided portrait image.
-    ID: ${requestId}
+    ROLE: Expert Professional ID Photo Editor & Retoucher.
+    REQUEST ID: ${requestId}
+    
+    INPUT IMAGE ANALYSIS:
+    1. Identify the MAIN SUBJECT in the image. 
+    2. The input might be a wide shot, a full-body photo, a selfie, or have a messy background.
+    3. CHECK IF THE SHOULDERS ARE CUT OFF in the original image.
+    4. YOUR GOAL is to create a formal Passport/ID photo of ONLY the main subject's head and shoulders.
 
-    CRITICAL INSTRUCTIONS FOR PERFECT RESULT (STRICTNESS: ${strictnessLevel}):
+    STRICT EXECUTION STEPS:
+    
+    STEP 1: CROP & EXTRACT (CRITICAL)
+    - If the input is a wide/full-body shot, ZOOM IN and CROP TIGHTLY to show only the Head and Upper Shoulders.
+    - DISCARD everything else: background scenery, other people, hands, furniture, or body parts below the chest.
+    - REMOVE the original background completely.
+    
+    STEP 2: SHOULDER EXTENSION (IMPORTANT FOR SELFIES)
+    - If the subject's shoulders are cut off or incomplete in the input (e.g., a close-up selfie), you MUST realistically GENERATE/OUTPAINT the missing parts of the shoulders/suit to complete the standard ID photo frame.
+    - The final result must show a complete head and shoulder profile, not a floating head.
 
-    1. FACE & IDENTITY (ABSOLUTE PRIORITY):
-       - The face in the output MUST be identical to the source image.
-       - Preserve all facial features, eye shape, nose shape, mouth, and skin tone EXACTLY.
-       - Do NOT distort, beautify, or "cartoonize" the face.
-       - ${config.category === 'military' ? 'MILITARY SPECIFIC: Adding a uniform often causes the model to generate a generic "soldier face". DO NOT DO THIS. Keep the original civilian face exactly as it is, and only change the pixels below the neck.' : 'Keep it realistic.'}
+    STEP 3: FACE PRESERVATION
+    - Preserve the original facial features, skin texture, and identity with 100% fidelity.
+    - Do NOT cartoonize, smooth excessively, or alter the person's bone structure.
+    - Ensure the face remains sharp and high-resolution.
 
-    2. POSE & ALIGNMENT:
-       - The subject MUST face the camera directly (Frontal View).
-       - STRAIGHTEN THE HEAD: If the head is tilted in the source, rotate it so it is vertical.
-       - LEVEL SHOULDERS: Shoulders must be completely horizontal and symmetrical.
-       - ${config.category === 'military' ? 'NOTE: If straightening the head distorts the facial identity, prioritize IDENTITY over perfect alignment.' : 'Correct any leaning or rotation.'}
+    STEP 4: POSTURE CORRECTION
+    - Re-orient the subject to face the camera directly (Frontal View).
+    - Level the shoulders. Straighten the head if tilted.
 
-    3. ATTIRE:
-       - Replace the existing clothing with: ${clothingDesc}.
-       ${extraInstructions}
-       - The clothing must fit naturally on the corrected straight posture.
-       - Ensure the neck connection between the original face and the new uniform is seamless and realistic.
+    STEP 5: ATTIRE REPLACEMENT
+    - Replace current clothing with: ${clothingDesc}.
+    ${extraInstructions}
+    - Ensure the clothes fit the corrected posture naturally.
 
-    4. ENVIRONMENT:
-       - Background: Solid Pure White (#FFFFFF).
-       - Lighting: Soft, even studio lighting. Avoid harsh shadows on the face.
-       - Framing: Standard Passport Crop (Head and Shoulders).
+    STEP 6: COMPOSITION
+    - Background: SOLID PURE WHITE (#FFFFFF). No shadows or gradients on background.
+    - Framing: Standard Portrait ID Crop (Head roughly 60-70% of frame height).
+    - Lighting: Soft professional studio lighting.
+    
+    ${config.promptModifier ? `ADDITIONAL INSTRUCTIONS: ${config.promptModifier}` : ''}
 
-    Output a single high-quality, photorealistic image.
+    Output ONLY the final processed image.
   `;
 
   const finalParts = [
@@ -204,16 +226,15 @@ export const transformImage = async (
   ];
 
   let lastError: any = null;
-  // Reduce retries to avoid "Fake" quota errors. If it fails twice, it's likely a real error.
-  const MAX_RETRIES = 3; 
+  const MAX_RETRIES = 2; 
   
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      if (attempt > 0 && onProgress) {
-        onProgress("جاري محاولة الاتصال بالخادم...");
+      if (onProgress) {
+        if (attempt === 0) onProgress("جاري تحليل الصورة واستخراج الشخص...");
+        else onProgress(`محاولة ${attempt + 1} من ${MAX_RETRIES + 1}...`);
       }
 
-      // Use the new Google GenAI SDK method
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image', 
         contents: {
@@ -226,13 +247,21 @@ export const transformImage = async (
         },
       });
 
+      // Check for image output
       for (const part of response.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData && part.inlineData.data) {
           return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
 
-      throw new Error("لم يتم إرجاع أي صورة من النموذج (رد فارغ).");
+      // Check for text refusal/error
+      const textOutput = response.candidates?.[0]?.content?.parts?.find((p: any) => p.text)?.text;
+      if (textOutput) {
+        console.warn("Model returned text instead of image:", textOutput);
+        throw new Error(`رفض النموذج المعالجة: ${textOutput.substring(0, 100)}...`);
+      }
+
+      throw new Error("لم يتم إرجاع أي بيانات من النموذج.");
 
     } catch (error: any) {
       console.error(`Gemini API Error (Attempt ${attempt + 1}):`, error);
@@ -240,51 +269,26 @@ export const transformImage = async (
       
       const errorMsg = (error.message || error.toString()).toLowerCase();
       
-      // STOP RETRYING on these errors. They are fatal.
-      if (errorMsg.includes("400") || errorMsg.includes("invalid argument")) {
-         throw new Error("⚠️ الصورة المرسلة غير مدعومة أو كبيرة جداً. يرجى تجربة صورة أخرى.");
+      // Fatal errors - do not retry
+      if (errorMsg.includes("400") || errorMsg.includes("invalid argument") || errorMsg.includes("refusal") || errorMsg.includes("safety")) {
+         throw new Error("⚠️ تعذر معالجة الصورة. قد تكون غير واضحة أو تخالف سياسات الأمان.");
       }
-      if (errorMsg.includes("403") || errorMsg.includes("permission denied")) {
-         throw new Error("⚠️ مشكلة في الصلاحيات. قد يكون مفتاح API محظوراً أو غير مفعل في هذا النطاق.");
-      }
-      if (errorMsg.includes("404") || errorMsg.includes("not found")) {
-         throw new Error("⚠️ النموذج المطلوب غير متوفر حالياً.");
-      }
-      if (errorMsg.includes("safety") || errorMsg.includes("blocked")) {
-        throw new Error("⚠️ تم حظر الصورة لسبب أمني (Safety Filter).");
-      }
-
-      // Only retry on actual server overload or network glitches
-      if (
-        errorMsg.includes("429") || 
-        errorMsg.includes("quota") || 
-        errorMsg.includes("503") || 
-        errorMsg.includes("overloaded") ||
-        errorMsg.includes("fetch failed") // CORS or Network drop
-      ) {
-        if (attempt === MAX_RETRIES - 1) break;
-        
-        let waitTimeMs = 2000 * Math.pow(2, attempt); 
+      
+      // Retryable errors
+      if (attempt < MAX_RETRIES) {
+        const waitTimeMs = 2000 * Math.pow(2, attempt); 
         await delay(waitTimeMs);
         continue;
       }
-
-      // Unknown error? Don't retry blindly.
-      break; 
     }
   }
 
-  // Final Diagnostics
+  // Final Error Handling
   const finalMsg = (lastError.message || lastError.toString()).toLowerCase();
   
   if (finalMsg.includes("429") || finalMsg.includes("quota")) {
-    throw new Error("⚠️ الخادم مشغول جداً (429 Too Many Requests). يرجى الانتظار دقيقة والماولة.");
+    throw new Error("⚠️ الخادم مشغول (429). يرجى المحاولة بعد قليل.");
   }
   
-  // Specific catch for the "Failed to fetch" which is usually CORS/SW/Privacy
-  if (finalMsg.includes("failed to fetch")) {
-     throw new Error("⚠️ فشل الاتصال (Network Error). قد يكون السبب إضافة حجب إعلانات، أو جدار ناري، أو ضعف في الإنترنت.");
-  }
-
-  throw new Error(`خطأ: ${lastError.message || "Unknown Error"}`);
+  throw new Error(`فشل المعالجة: ${lastError.message || "خطأ غير معروف"}`);
 };

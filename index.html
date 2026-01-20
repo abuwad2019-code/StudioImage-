@@ -41,6 +41,21 @@
       }
     </script>
     <style>
+      :root {
+        --sat: env(safe-area-inset-top);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+        --sar: env(safe-area-inset-right);
+      }
+
+      body {
+        /* Ensure content respects safe areas (Notch/Home Indicator) */
+        padding-top: var(--sat);
+        padding-bottom: var(--sab);
+        padding-left: var(--sal);
+        padding-right: var(--sar);
+      }
+
       /* Custom Ticker Animation */
       @keyframes ticker {
         0% { transform: translateX(-100%); }
