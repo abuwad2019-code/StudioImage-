@@ -9,6 +9,7 @@ const compressImage = (base64Str: string, maxWidth = 512, quality = 0.6): Promis
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
+    img.crossOrigin = "anonymous"; // Handle cross-origin images if necessary
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let width = img.width;
@@ -53,15 +54,24 @@ export const transformImage = async (
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // 1. COMPRESSION
+  // 1. COMPRESSION & MIME TYPE HANDLING
   let processedBase64 = base64Image;
+  let mimeType = 'image/jpeg'; // Default if compressed
+  
   try {
     processedBase64 = await compressImage(base64Image, 512, 0.6);
+    // compressImage always returns image/jpeg
   } catch (e) {
     console.warn("Image compression failed, using original", e);
+    // If compression fails, we must detect the original mime type to avoid sending PNG as JPEG
+    const match = base64Image.match(/^data:(image\/[a-zA-Z]+);base64,/);
+    if (match) {
+      mimeType = match[1];
+    }
   }
 
-  const cleanBase64 = processedBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
+  // Remove the data URL header for the API
+  const cleanBase64 = processedBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
 
   const getStyleDescription = (s: ClothingStyle) => {
     switch (s) {
@@ -192,11 +202,11 @@ export const transformImage = async (
     Output a single high-quality, photorealistic image.
   `;
 
-  // Updated order: Main Image first, then extra parts (images), then text prompt.
+  // Updated order: Main Image first (with correct mimeType), then extra parts, then text.
   const finalParts = [
     { 
       inlineData: {
-        mimeType: 'image/jpeg',
+        mimeType: mimeType, // Use dynamic mimeType
         data: cleanBase64,
       }
     },
@@ -206,7 +216,7 @@ export const transformImage = async (
 
   // 2. RETRY LOGIC WITH QUEUE SIMULATION
   let lastError: any = null;
-  const MAX_RETRIES = 10; // Extended retries to allow for queuing
+  const MAX_RETRIES = 10; 
   
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -214,11 +224,14 @@ export const transformImage = async (
         onProgress("جاري محاولة الاتصال بالخادم...");
       }
 
+      // Use the canonical array format for contents
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image', 
-        contents: {
-          parts: finalParts,
-        },
+        contents: [
+          {
+            parts: finalParts,
+          }
+        ],
         config: {
           imageConfig: {
             aspectRatio: config.ratio,
@@ -240,20 +253,13 @@ export const transformImage = async (
       
       const errorMsg = (error.message || error.toString()).toLowerCase();
       
-      // Quota / Overloaded Handling
+      // Handle known errors
       if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("exhausted") || errorMsg.includes("503") || errorMsg.includes("overloaded")) {
-        // If we reached max retries, throw the final error
         if (attempt === MAX_RETRIES - 1) break;
-
-        // Exponential backoff with a cap and jitter
-        // Retries: 0->2s, 1->4s, 2->8s, 3->15s...
-        let waitTimeMs = Math.min(20000, 2000 * Math.pow(2, attempt)); 
-        waitTimeMs += Math.random() * 1000; // Jitter
-
-        // Queue Simulation
-        // Start high, decrease as we retry
-        const simulatedQueuePos = Math.max(1, 15 - Math.floor(attempt * 2));
         
+        let waitTimeMs = Math.min(20000, 2000 * Math.pow(2, attempt)); 
+        waitTimeMs += Math.random() * 1000;
+        const simulatedQueuePos = Math.max(1, 15 - Math.floor(attempt * 2));
         let remainingSeconds = Math.ceil(waitTimeMs / 1000);
 
         while (remainingSeconds > 0) {
@@ -263,16 +269,13 @@ export const transformImage = async (
           await delay(1000);
           remainingSeconds--;
         }
-        
         continue;
       }
 
-      // 404 means model not found or resource missing, usually fatal
       if (errorMsg.includes("404") || errorMsg.includes("not_found")) {
          throw new Error("⚠️ خطأ في الاتصال بالنموذج (404). يرجى التأكد من أن مفتاح API صالح.");
       }
       
-      // Safety blocks
       if (errorMsg.includes("safety") || errorMsg.includes("blocked")) {
         throw new Error("⚠️ تم حظر الصورة لسبب أمني. يرجى استخدام صورة شخصية واضحة ورسمية.");
       }
@@ -282,11 +285,16 @@ export const transformImage = async (
     }
   }
 
-  // If we exit loop without returning
+  // Final error handling
   const errorMsg = (lastError.message || lastError.toString()).toLowerCase();
   
   if (errorMsg.includes("429") || errorMsg.includes("exhausted") || errorMsg.includes("quota")) {
     throw new Error("⚠️ الخادم مشغول جداً (Quota Exceeded). نعتذر، يرجى المحاولة في وقت لاحق.");
+  }
+  
+  // Generic network error often means SW blocked it or CORS issue
+  if (errorMsg.includes("failed to fetch") || errorMsg.includes("network")) {
+     throw new Error("⚠️ فشل الاتصال بالشبكة. يرجى التحقق من اتصال الإنترنت، أو تحديث الصفحة.");
   }
 
   throw new Error("حدث خطأ أثناء المعالجة: " + (lastError.message || "Unknown Error"));

@@ -1,5 +1,5 @@
 // sw.js - Service Worker with Robust Offline Support
-const CACHE_NAME = 'studio-cache-v8';
+const CACHE_NAME = 'studio-cache-v9'; // Incremented version to force update
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -43,12 +43,11 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const isNavigate = event.request.mode === 'navigate';
 
-  // 1. Navigation Fallback (Solution 3: SPA Routing Support)
+  // 1. Navigation Fallback (SPA Routing Support)
   if (isNavigate) {
     event.respondWith(
       fetch(event.request)
         .catch(() => {
-          // If offline, return index.html
           return caches.match('/index.html');
         })
     );
@@ -63,7 +62,10 @@ self.addEventListener('fetch', (event) => {
       caches.match(event.request).then((response) => {
         return response || fetch(event.request).then((fetchRes) => {
           return caches.open(CACHE_NAME).then((cache) => {
-             cache.put(event.request, fetchRes.clone());
+             // Only cache valid GET responses
+             if (event.request.method === 'GET' && fetchRes.status === 200) {
+                cache.put(event.request, fetchRes.clone());
+             }
              return fetchRes;
           });
         });
@@ -73,7 +75,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 3. For API Calls: Network Only
-  if (url.hostname.includes('googletagmanager') || url.hostname.includes('generativelanguage')) {
+  // Explicitly ignore caching for any Google API to prevent CORS/POST issues
+  if (url.hostname.includes('googleapis') || url.hostname.includes('generativelanguage')) {
     event.respondWith(fetch(event.request));
     return;
   }
@@ -82,8 +85,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-           // Don't cache tsx files in runtime
+        // CRITICAL FIX: Only cache GET requests.
+        // Attempting to cache POST requests (like Gemini API calls if they fall through) throws an error.
+        if (event.request.method === 'GET' && networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+           // Don't cache tsx files in runtime/dev
            if (!url.pathname.endsWith('.tsx')) {
              const responseToCache = networkResponse.clone();
              caches.open(CACHE_NAME).then((cache) => {

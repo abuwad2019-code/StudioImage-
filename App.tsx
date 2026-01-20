@@ -6,11 +6,17 @@ import Preview from './components/Preview';
 import InfoTicker from './components/InfoTicker';
 import { AppState, AspectRatio, GenerationConfig, MilitaryOptions } from './types';
 import { transformImage } from './services/geminiService';
-import { AlertCircle, RefreshCw, WifiOff, Wifi, ExternalLink, MessageCircle } from 'lucide-react';
+import { AlertCircle, RefreshCw, WifiOff, Wifi, ExternalLink, MessageCircle, Download, Share, X } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  
+  // PWA Install State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallButton, setShowInstallButton] = useState(false);
+  const [showIOSInstructions, setShowIOSInstructions] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
   
   const [state, setState] = useState<AppState>({
     isLoading: false,
@@ -33,22 +39,18 @@ const App: React.FC = () => {
     },
   });
 
-  // Handle Theme Logic (Time based + Persistence)
+  // Handle Theme Logic
   useEffect(() => {
-    // 1. Check Local Storage
     const savedTheme = localStorage.getItem('theme');
-    
     if (savedTheme) {
       setIsDarkMode(savedTheme === 'dark');
     } else {
-      // 2. Check Time (6 PM to 6 AM is Night)
       const hour = new Date().getHours();
       const isNight = hour >= 18 || hour < 6;
       setIsDarkMode(isNight);
     }
   }, []);
 
-  // Apply Theme Class
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
@@ -77,6 +79,63 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // PWA Installation Logic
+  useEffect(() => {
+    // 1. Check iOS
+    const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOS(isIosDevice);
+
+    // 2. Check Standalone (Is already installed?)
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    
+    if (isStandalone) {
+      setShowInstallButton(false);
+      return; 
+    }
+
+    // 3. Handle Android/Desktop Install Prompt
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallButton(true);
+    };
+
+    const handleAppInstalled = () => {
+      setShowInstallButton(false);
+      setDeferredPrompt(null);
+      console.log('App successfully installed');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    // Show button for iOS if not standalone (iOS doesn't fire beforeinstallprompt)
+    if (isIosDevice && !isStandalone) {
+      setShowInstallButton(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (isIOS) {
+      setShowIOSInstructions(true);
+      return;
+    }
+
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setShowInstallButton(false);
+      }
+      setDeferredPrompt(null);
+    }
+  };
+
   const handleImageSelect = (base64: string) => {
     setState(prev => ({
       ...prev,
@@ -90,27 +149,18 @@ const App: React.FC = () => {
 
   const handleConfigChange = (key: keyof GenerationConfig, value: any) => {
     setState(prev => {
-      // Create a copy of the config with the new value applied
       const newConfig = { ...prev.config, [key]: value };
 
-      // Handle dependent logic
-
-      // 1. If Gender changes
       if (key === 'gender') {
-        // If in civilian mode, switch style to the default for that gender
         if (newConfig.category === 'civilian') {
           newConfig.style = value === 'male' ? 'civilian_suit_black' : 'women_abaya_black';
         }
-        // Military styles are currently unisex/shared in the UI logic, so we keep the current style
       }
 
-      // 2. If Category changes
       if (key === 'category') {
         if (value === 'civilian') {
-           // Switch to default civilian style for the current gender
            newConfig.style = newConfig.gender === 'male' ? 'civilian_suit_black' : 'women_abaya_black';
         } else if (value === 'military') {
-           // Switch to default military style
            newConfig.style = 'military_camouflage';
         }
       }
@@ -186,7 +236,12 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-6 flex flex-col transition-colors duration-200">
-      <Header isDarkMode={isDarkMode} toggleTheme={toggleTheme} />
+      <Header 
+        isDarkMode={isDarkMode} 
+        toggleTheme={toggleTheme} 
+        isInstallable={showInstallButton}
+        onInstallClick={handleInstallClick}
+      />
       <InfoTicker />
 
       {/* Offline Banner */}
@@ -234,8 +289,6 @@ const App: React.FC = () => {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Left Column (Controls & Upload - on Desktop) */}
           <div className="lg:col-span-4 space-y-6 order-2 lg:order-1">
              <Controls 
                 config={state.config}
@@ -257,7 +310,6 @@ const App: React.FC = () => {
              </div>
           </div>
 
-          {/* Right Column (Preview/Result) */}
           <div className="lg:col-span-8 order-1 lg:order-2">
             <div className="bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 min-h-[500px] transition-colors">
               {!state.image ? (
@@ -270,13 +322,30 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
-
         </div>
       </main>
 
       <footer className="mt-12 py-10 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 transition-colors">
         <div className="max-w-5xl mx-auto px-4 flex flex-col items-center gap-8 text-center">
           
+          {/* Prominent Footer Install Button */}
+          {showInstallButton && (
+            <div className="w-full max-w-md animate-in slide-in-from-bottom-4 fade-in duration-700">
+               <button 
+                 onClick={handleInstallClick}
+                 className="w-full bg-gray-900 dark:bg-gray-700 text-white hover:bg-gray-800 dark:hover:bg-gray-600 p-4 rounded-xl shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all flex items-center justify-center gap-4 group"
+               >
+                 <div className="bg-white/10 p-3 rounded-full group-hover:bg-white/20 transition-colors">
+                    <Download size={28} />
+                 </div>
+                 <div className="text-right">
+                    <div className="text-sm opacity-80 font-medium">تجربة أفضل بدون إنترنت</div>
+                    <div className="text-xl font-bold">تثبيت التطبيق على جهازك</div>
+                 </div>
+               </button>
+            </div>
+          )}
+
           <div className="flex flex-col items-center gap-3">
              <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">تم تطوير هذا الوكيل الذكي بواسطة</p>
              <a 
@@ -310,6 +379,50 @@ const App: React.FC = () => {
           </p>
         </div>
       </footer>
+
+      {/* iOS Instructions Modal */}
+      {showIOSInstructions && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-2xl p-6 shadow-2xl relative animate-in slide-in-from-bottom-10 transition-colors">
+            <button 
+              onClick={() => setShowIOSInstructions(false)}
+              className="absolute top-4 left-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            >
+              <X size={24} />
+            </button>
+            
+            <div className="text-center space-y-4">
+              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-2xl mx-auto flex items-center justify-center shadow-inner">
+                 <img src="/icon.svg" className="w-10 h-10" alt="App Icon" />
+              </div>
+              
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">تثبيت التطبيق على الآيفون</h3>
+              
+              <div className="space-y-4 text-right text-sm text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="w-6 h-6 flex items-center justify-center bg-gray-200 dark:bg-gray-600 rounded-full font-bold text-xs shrink-0 dark:text-white">1</span>
+                  <p>اضغط على زر <span className="font-bold text-blue-600 dark:text-blue-400 inline-flex items-center mx-1"><Share size={14} className="ml-1"/> مشاركة</span> في أسفل المتصفح</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-6 h-6 flex items-center justify-center bg-gray-200 dark:bg-gray-600 rounded-full font-bold text-xs shrink-0 dark:text-white">2</span>
+                  <p>اختر <span className="font-bold text-gray-800 dark:text-gray-200">إضافة إلى الصفحة الرئيسية</span> (Add to Home Screen)</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-6 h-6 flex items-center justify-center bg-gray-200 dark:bg-gray-600 rounded-full font-bold text-xs shrink-0 dark:text-white">3</span>
+                  <p>اضغط على <span className="font-bold">إضافة</span> في الزاوية العلوية</p>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setShowIOSInstructions(false)}
+                className="w-full bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 rounded-xl transition-colors"
+              >
+                فهمت ذلك
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
