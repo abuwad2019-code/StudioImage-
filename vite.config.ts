@@ -22,6 +22,19 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
+      // Increase the warning limit to 1000kb (1MB) to silence the warning regarding large libraries
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          // Smartly separate large libraries into their own chunks for better browser caching
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-pdf': ['jspdf', 'html2canvas'],
+            'vendor-genai': ['@google/genai'],
+            'vendor-icons': ['lucide-react']
+          }
+        }
+      }
     },
     define: {
       // Expose the API key safely to the client bundle
