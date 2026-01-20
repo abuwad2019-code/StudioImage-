@@ -9,13 +9,12 @@ const compressImage = (base64Str: string, maxWidth = 512, quality = 0.6): Promis
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
-    img.crossOrigin = "anonymous"; // Handle cross-origin images if necessary
+    img.crossOrigin = "anonymous"; 
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let width = img.width;
       let height = img.height;
 
-      // Calculate new dimensions
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width);
         width = maxWidth;
@@ -30,12 +29,10 @@ const compressImage = (base64Str: string, maxWidth = 512, quality = 0.6): Promis
         return;
       }
       
-      // Draw with white background
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
       
-      // Return compressed base64
       resolve(canvas.toDataURL('image/jpeg', quality));
     };
     img.onerror = (error) => reject(error);
@@ -54,39 +51,33 @@ export const transformImage = async (
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // 1. COMPRESSION & MIME TYPE HANDLING
+  // 1. COMPRESSION
   let processedBase64 = base64Image;
-  let mimeType = 'image/jpeg'; // Default if compressed
+  let mimeType = 'image/jpeg';
   
   try {
     processedBase64 = await compressImage(base64Image, 512, 0.6);
-    // compressImage always returns image/jpeg
   } catch (e) {
     console.warn("Image compression failed, using original", e);
-    // If compression fails, we must detect the original mime type to avoid sending PNG as JPEG
     const match = base64Image.match(/^data:(image\/[a-zA-Z]+);base64,/);
     if (match) {
       mimeType = match[1];
     }
   }
 
-  // Remove the data URL header for the API
   const cleanBase64 = processedBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
 
   const getStyleDescription = (s: ClothingStyle) => {
     switch (s) {
-      // Men Civilian
       case 'civilian_suit_black': return "a professional formal black business suit with a white shirt and tie";
       case 'civilian_suit_blue': return "a professional formal navy blue business suit with a white shirt and tie";
       case 'civilian_suit_grey': return "a professional formal dark grey business suit with a white shirt and tie";
       case 'civilian_traditional': return "formal traditional clothing suitable for official documents";
       
-      // Women Civilian
       case 'women_abaya_black': return "a modest, elegant professional black abaya with a matching black hijab covering hair";
       case 'women_abaya_colored': return "a modest, elegant beige or brown modest abaya with a matching hijab covering hair";
       case 'women_formal_hijab': return "a professional formal business blazer/jacket with a modest hijab covering hair";
 
-      // Military (Base descriptions, overridden by country logic below)
       case 'military_camouflage': return "a professional military camouflage uniform";
       case 'military_formal': return "a professional formal dress military uniform";
       case 'military_special_forces': return "a tactical black special forces uniform";
@@ -113,27 +104,19 @@ export const transformImage = async (
   let parts: any[] = [];
   let strictnessLevel = "HIGH";
 
-  // Gender specific prompt
-  const subjectDescription = config.gender === 'female' ? "woman" : "man";
-
-  // Construct prompt based on category and options
   if (config.category === 'military') {
-    strictnessLevel = "EXTREME"; // Increase strictness for military to prevent hallucination
+    strictnessLevel = "EXTREME"; 
     
-    // 1. Country Specifics
     const countryDetails = getCountryMilitaryDetails(config.militaryOptions.country);
     
-    // Override general description with country specific if it's a camouflage request
     if (config.style === 'military_camouflage') {
       clothingDesc = `a professional ${countryDetails}`;
     } else {
       clothingDesc = `${clothingDesc} in the style of ${config.militaryOptions.country} armed forces`;
     }
 
-    // 2. Headwear
     if (config.militaryOptions.hasBeret) {
       if (config.militaryOptions.beretImage) {
-        // Handle uploaded beret
         let beretBase64 = config.militaryOptions.beretImage;
         try { beretBase64 = await compressImage(beretBase64, 256, 0.6); } catch(e) {}
         const cleanBeret = beretBase64.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
@@ -148,7 +131,6 @@ export const transformImage = async (
       extraInstructions += " HEADWEAR: Do NOT generate any hat, helmet, or beret. Bare head.";
     }
 
-    // 3. Rank
     if (config.militaryOptions.hasRank && config.militaryOptions.rankImage) {
       let rankBase64 = config.militaryOptions.rankImage;
       try {
@@ -171,8 +153,12 @@ export const transformImage = async (
     }
   }
 
+  // Add random ID to prompt to prevent any aggressive caching on Google's side
+  const requestId = Math.random().toString(36).substring(7);
+
   const prompt = `
     TASK: Create a professional formal ID/Passport photo from the provided portrait image.
+    ID: ${requestId}
 
     CRITICAL INSTRUCTIONS FOR PERFECT RESULT (STRICTNESS: ${strictnessLevel}):
 
@@ -202,11 +188,10 @@ export const transformImage = async (
     Output a single high-quality, photorealistic image.
   `;
 
-  // Updated order: Main Image first (with correct mimeType), then extra parts, then text.
   const finalParts = [
     { 
       inlineData: {
-        mimeType: mimeType, // Use dynamic mimeType
+        mimeType: mimeType, 
         data: cleanBase64,
       }
     },
@@ -214,7 +199,6 @@ export const transformImage = async (
     { text: prompt },
   ];
 
-  // 2. RETRY LOGIC WITH QUEUE SIMULATION
   let lastError: any = null;
   const MAX_RETRIES = 10; 
   
@@ -224,14 +208,12 @@ export const transformImage = async (
         onProgress("جاري محاولة الاتصال بالخادم...");
       }
 
-      // Use the canonical array format for contents
+      // Updated: Send as Object, not Array of Objects, for proper single-turn structure
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image', 
-        contents: [
-          {
-            parts: finalParts,
-          }
-        ],
+        contents: {
+          parts: finalParts,
+        },
         config: {
           imageConfig: {
             aspectRatio: config.ratio,
@@ -245,26 +227,35 @@ export const transformImage = async (
         }
       }
 
-      throw new Error("لم يتم إرجاع أي صورة من النموذج.");
+      throw new Error("لم يتم إرجاع أي صورة من النموذج (رد فارغ).");
 
     } catch (error: any) {
-      console.warn(`Attempt ${attempt + 1} failed:`, error.message);
+      console.warn(`Attempt ${attempt + 1} failed:`, error);
       lastError = error;
       
       const errorMsg = (error.message || error.toString()).toLowerCase();
       
-      // Handle known errors
-      if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("exhausted") || errorMsg.includes("503") || errorMsg.includes("overloaded")) {
+      // Handle Quota/Overloaded/Network Errors
+      if (
+        errorMsg.includes("429") || 
+        errorMsg.includes("quota") || 
+        errorMsg.includes("exhausted") || 
+        errorMsg.includes("503") || 
+        errorMsg.includes("overloaded") ||
+        errorMsg.includes("fetch") || // Retry on network glitches too
+        errorMsg.includes("network")
+      ) {
         if (attempt === MAX_RETRIES - 1) break;
         
         let waitTimeMs = Math.min(20000, 2000 * Math.pow(2, attempt)); 
         waitTimeMs += Math.random() * 1000;
+        
         const simulatedQueuePos = Math.max(1, 15 - Math.floor(attempt * 2));
         let remainingSeconds = Math.ceil(waitTimeMs / 1000);
 
         while (remainingSeconds > 0) {
           if (onProgress) {
-             onProgress(`⚠️ ضغط عالٍ على الخادم.. دورك في الطابور: ${simulatedQueuePos} (انتظار ${remainingSeconds}ث)`);
+             onProgress(`⚠️ الخادم مشغول.. المحاولة ${attempt + 1} من ${MAX_RETRIES} (انتظار ${remainingSeconds}ث)`);
           }
           await delay(1000);
           remainingSeconds--;
@@ -272,30 +263,31 @@ export const transformImage = async (
         continue;
       }
 
+      // Fatal Errors
       if (errorMsg.includes("404") || errorMsg.includes("not_found")) {
-         throw new Error("⚠️ خطأ في الاتصال بالنموذج (404). يرجى التأكد من أن مفتاح API صالح.");
+         throw new Error("⚠️ خطأ 404: النموذج غير موجود أو مفتاح API غير صالح.");
       }
-      
       if (errorMsg.includes("safety") || errorMsg.includes("blocked")) {
-        throw new Error("⚠️ تم حظر الصورة لسبب أمني. يرجى استخدام صورة شخصية واضحة ورسمية.");
+        throw new Error("⚠️ تم حظر الصورة لسبب أمني (Safety Filter). حاول استخدام صورة مختلفة.");
+      }
+      if (errorMsg.includes("400") || errorMsg.includes("invalid argument")) {
+         throw new Error("⚠️ خطأ في البيانات المرسلة (400). حاول استخدام صورة أصغر أو نوع مختلف.");
       }
 
-      // Other errors, break and throw
       break; 
     }
   }
 
-  // Final error handling
-  const errorMsg = (lastError.message || lastError.toString()).toLowerCase();
+  // Final Diagnostics
+  const finalMsg = (lastError.message || lastError.toString()).toLowerCase();
   
-  if (errorMsg.includes("429") || errorMsg.includes("exhausted") || errorMsg.includes("quota")) {
-    throw new Error("⚠️ الخادم مشغول جداً (Quota Exceeded). نعتذر، يرجى المحاولة في وقت لاحق.");
+  if (finalMsg.includes("429") || finalMsg.includes("exhausted") || finalMsg.includes("quota")) {
+    throw new Error("⚠️ تم تجاوز حد الاستخدام (Quota Exceeded). الخادم مشغول جداً حالياً.");
   }
   
-  // Generic network error often means SW blocked it or CORS issue
-  if (errorMsg.includes("failed to fetch") || errorMsg.includes("network")) {
-     throw new Error("⚠️ فشل الاتصال بالشبكة. يرجى التحقق من اتصال الإنترنت، أو تحديث الصفحة.");
+  if (finalMsg.includes("failed to fetch") || finalMsg.includes("network")) {
+     throw new Error("⚠️ فشل الاتصال بالخادم. تأكد من الإنترنت، أو أن إعدادات الشبكة لا تحظر Google API.");
   }
 
-  throw new Error("حدث خطأ أثناء المعالجة: " + (lastError.message || "Unknown Error"));
+  throw new Error(`حدث خطأ غير متوقع: ${lastError.message || "Unknown"}`);
 };
