@@ -43,7 +43,8 @@ const compressImage = (base64Str: string, maxWidth = 512, quality = 0.6): Promis
 
 export const transformImage = async (
   base64Image: string,
-  config: GenerationConfig
+  config: GenerationConfig,
+  onProgress?: (message: string) => void
 ): Promise<string> => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
@@ -203,21 +204,24 @@ export const transformImage = async (
     { text: prompt },
   ];
 
-  // 2. RETRY LOGIC
+  // 2. RETRY LOGIC WITH QUEUE SIMULATION
   let lastError: any = null;
-  const MAX_RETRIES = 3;
-
+  const MAX_RETRIES = 10; // Extended retries to allow for queuing
+  
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
+      if (attempt > 0 && onProgress) {
+        onProgress("جاري محاولة الاتصال بالخادم...");
+      }
+
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image', // Reverted to flash-image for stability
+        model: 'gemini-2.5-flash-image', 
         contents: {
           parts: finalParts,
         },
         config: {
           imageConfig: {
             aspectRatio: config.ratio,
-            // imageSize Removed as it is not supported in flash-image
           }
         },
       });
@@ -236,32 +240,53 @@ export const transformImage = async (
       
       const errorMsg = (error.message || error.toString()).toLowerCase();
       
-      if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("exhausted") || errorMsg.includes("503")) {
-        const waitTime = 2000 * Math.pow(2, attempt);
-        await delay(waitTime);
+      // Quota / Overloaded Handling
+      if (errorMsg.includes("429") || errorMsg.includes("quota") || errorMsg.includes("exhausted") || errorMsg.includes("503") || errorMsg.includes("overloaded")) {
+        // If we reached max retries, throw the final error
+        if (attempt === MAX_RETRIES - 1) break;
+
+        // Exponential backoff with a cap and jitter
+        // Retries: 0->2s, 1->4s, 2->8s, 3->15s...
+        let waitTimeMs = Math.min(20000, 2000 * Math.pow(2, attempt)); 
+        waitTimeMs += Math.random() * 1000; // Jitter
+
+        // Queue Simulation
+        // Start high, decrease as we retry
+        const simulatedQueuePos = Math.max(1, 15 - Math.floor(attempt * 2));
+        
+        let remainingSeconds = Math.ceil(waitTimeMs / 1000);
+
+        while (remainingSeconds > 0) {
+          if (onProgress) {
+             onProgress(`⚠️ ضغط عالٍ على الخادم.. دورك في الطابور: ${simulatedQueuePos} (انتظار ${remainingSeconds}ث)`);
+          }
+          await delay(1000);
+          remainingSeconds--;
+        }
+        
         continue;
       }
-      // 404 means model not found or resource missing, usually fatal, but we retry just in case it's a transient routing issue
+
+      // 404 means model not found or resource missing, usually fatal
       if (errorMsg.includes("404") || errorMsg.includes("not_found")) {
-         // Don't retry 404 endlessly, but maybe once? Usually fatal.
-         break;
+         throw new Error("⚠️ خطأ في الاتصال بالنموذج (404). يرجى التأكد من أن مفتاح API صالح.");
       }
+      
+      // Safety blocks
+      if (errorMsg.includes("safety") || errorMsg.includes("blocked")) {
+        throw new Error("⚠️ تم حظر الصورة لسبب أمني. يرجى استخدام صورة شخصية واضحة ورسمية.");
+      }
+
+      // Other errors, break and throw
       break; 
     }
   }
 
+  // If we exit loop without returning
   const errorMsg = (lastError.message || lastError.toString()).toLowerCase();
   
-  if (errorMsg.includes("404") || errorMsg.includes("not_found")) {
-     // Specific error for 404 to help debug
-     throw new Error("⚠️ خطأ في الاتصال بالنموذج (404). يرجى التأكد من أن مفتاح API صالح.");
-  }
-
   if (errorMsg.includes("429") || errorMsg.includes("exhausted") || errorMsg.includes("quota")) {
-    throw new Error("⚠️ الخادم مشغول جداً (Quota Exceeded). يرجى الانتظار دقيقة والمحاولة مرة أخرى.");
-  }
-  if (errorMsg.includes("safety") || errorMsg.includes("blocked")) {
-    throw new Error("⚠️ تم حظر الصورة لسبب أمني. يرجى استخدام صورة شخصية واضحة ورسمية.");
+    throw new Error("⚠️ الخادم مشغول جداً (Quota Exceeded). نعتذر، يرجى المحاولة في وقت لاحق.");
   }
 
   throw new Error("حدث خطأ أثناء المعالجة: " + (lastError.message || "Unknown Error"));

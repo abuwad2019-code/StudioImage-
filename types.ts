@@ -51,6 +51,7 @@ export interface GenerationConfig {
 
 export interface AppState {
   isLoading: boolean;
+  loadingMessage?: string; // Shows detailed status like queue position
   error: string | null;
   image: ProcessedImage | null;
   config: GenerationConfig;

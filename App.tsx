@@ -14,6 +14,7 @@ const App: React.FC = () => {
   
   const [state, setState] = useState<AppState>({
     isLoading: false,
+    loadingMessage: undefined,
     error: null,
     image: null,
     config: {
@@ -138,6 +139,7 @@ const App: React.FC = () => {
     setState(prev => ({
       ...prev,
       isLoading: false,
+      loadingMessage: undefined,
       error: null,
       image: null,
     }));
@@ -154,17 +156,19 @@ const App: React.FC = () => {
 
     if (!state.image?.original) return;
 
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState(prev => ({ ...prev, isLoading: true, error: null, loadingMessage: undefined }));
 
     try {
       const generatedImage = await transformImage(
         state.image.original,
-        state.config
+        state.config,
+        (msg) => setState(prev => ({ ...prev, loadingMessage: msg }))
       );
 
       setState(prev => ({
         ...prev,
         isLoading: false,
+        loadingMessage: undefined,
         image: {
           original: prev.image!.original,
           generated: generatedImage
@@ -174,6 +178,7 @@ const App: React.FC = () => {
       setState(prev => ({
         ...prev,
         isLoading: false,
+        loadingMessage: undefined,
         error: error.message || "حدث خطأ غير متوقع"
       }));
     }
@@ -238,6 +243,7 @@ const App: React.FC = () => {
                 onMilitaryOptionChange={handleMilitaryOptionChange}
                 onGenerate={handleGenerate}
                 isLoading={state.isLoading}
+                loadingMessage={state.loadingMessage}
                 hasImage={!!state.image}
              />
              

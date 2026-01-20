@@ -14,6 +14,7 @@ interface ControlsProps {
   onMilitaryOptionChange: (key: keyof MilitaryOptions, value: any) => void;
   onGenerate: () => void;
   isLoading: boolean;
+  loadingMessage?: string; // New prop for status text
   hasImage: boolean;
 }
 
@@ -23,6 +24,7 @@ const Controls: React.FC<ControlsProps> = ({
   onMilitaryOptionChange,
   onGenerate,
   isLoading,
+  loadingMessage,
   hasImage
 }) => {
   const rankInputRef = useRef<HTMLInputElement>(null);
@@ -380,17 +382,24 @@ const Controls: React.FC<ControlsProps> = ({
         <button
           onClick={onGenerate}
           disabled={isGenerateDisabled}
-          className={`w-full py-4 px-4 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg transition-all shadow-lg ${
+          className={`w-full py-4 px-4 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg transition-all shadow-lg min-h-[64px] ${
             isGenerateDisabled
               ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed shadow-none opacity-70'
               : 'bg-primary-600 hover:bg-primary-700 hover:shadow-primary-500/30 hover:-translate-y-0.5 active:scale-[0.98]'
           }`}
         >
           {isLoading ? (
-            <>
-              <Loader2 size={24} className="animate-spin" />
-              <span>جاري المعالجة...</span>
-            </>
+             <div className="flex flex-col items-center justify-center leading-tight">
+                <div className="flex items-center gap-2">
+                  <Loader2 size={24} className="animate-spin" />
+                  <span>جاري المعالجة...</span>
+                </div>
+                {loadingMessage && (
+                  <span className="text-[10px] sm:text-xs opacity-90 mt-1 font-normal text-yellow-100 animate-pulse text-center">
+                     {loadingMessage}
+                  </span>
+                )}
+             </div>
           ) : !isOnline ? (
              <>
                <WifiOff size={24} />

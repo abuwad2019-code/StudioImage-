@@ -13,21 +13,45 @@ export default function Header({ isDarkMode, toggleTheme }: HeaderProps) {
   const [showIOSInstructions, setShowIOSInstructions] = useState(false);
 
   useEffect(() => {
-    // Check if device is iOS
+    // 1. Check if device is iOS
     const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
     setIsIOS(isIosDevice);
 
-    // Android/Chrome install handler
+    // 2. Check if App is already running in standalone (Smart feature)
+    // If it is standalone, we NEVER want to show the install button
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    if (isStandalone) {
+      setIsInstallable(false);
+      setDeferredPrompt(null);
+    }
+
+    // 3. Android/Chrome install handler
     const handler = (e: Event) => {
+      // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
+      
+      // If we are already in standalone, ignore this
+      if (window.matchMedia('(display-mode: standalone)').matches) return;
+
+      // Stash the event so it can be triggered later.
       setDeferredPrompt(e);
+      // Update UI notify the user they can install the PWA
       setIsInstallable(true);
     };
 
+    // 4. Handle "App Installed" event to hide button immediately
+    const handleAppInstalled = () => {
+      setIsInstallable(false);
+      setDeferredPrompt(null);
+      console.log('App successfully installed');
+    };
+
     window.addEventListener('beforeinstallprompt', handler);
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
 
@@ -43,6 +67,7 @@ export default function Header({ isDarkMode, toggleTheme }: HeaderProps) {
     const { outcome } = await deferredPrompt.userChoice;
     
     if (outcome === 'accepted') {
+      console.log('User accepted the install prompt');
       setIsInstallable(false);
     }
     setDeferredPrompt(null);
@@ -76,10 +101,11 @@ export default function Header({ isDarkMode, toggleTheme }: HeaderProps) {
               </button>
             )}
 
+            {/* Smart Install Button: Only shows if installable and NOT already installed */}
             {(isInstallable || isIOS) && (
               <button
                 onClick={handleInstallClick}
-                className="flex items-center gap-2 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors border border-primary-200 dark:border-primary-800"
+                className="flex items-center gap-2 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors border border-primary-200 dark:border-primary-800 animate-in fade-in"
               >
                 <Download size={16} />
                 <span>تثبيت</span>
