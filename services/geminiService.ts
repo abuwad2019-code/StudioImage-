@@ -44,14 +44,18 @@ export const transformImage = async (
   config: GenerationConfig,
   onProgress?: (message: string) => void
 ): Promise<string> => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("مفتاح API غير موجود. يرجى التأكد من إضافة API_KEY في إعدادات Environment Variables.");
+  // 1. ROBUST API KEY RETRIEVAL
+  // Try process.env first (injected by Vite define), then import.meta.env as fallback
+  const apiKey = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
+
+  if (!apiKey || apiKey === 'undefined' || apiKey === '') {
+    console.error("API Key is missing in build.");
+    throw new Error("مفتاح API مفقود. يرجى التأكد من إعدادات المتغيرات البيئية (Environment Variables) في الاستضافة.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // 1. COMPRESSION
+  // 2. COMPRESSION
   let processedBase64 = base64Image;
   let mimeType = 'image/jpeg';
   
@@ -200,7 +204,8 @@ export const transformImage = async (
   ];
 
   let lastError: any = null;
-  const MAX_RETRIES = 10; 
+  // Reduce retries to avoid "Fake" quota errors. If it fails twice, it's likely a real error.
+  const MAX_RETRIES = 3; 
   
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -208,7 +213,7 @@ export const transformImage = async (
         onProgress("جاري محاولة الاتصال بالخادم...");
       }
 
-      // Updated: Send as Object, not Array of Objects, for proper single-turn structure
+      // Use the new Google GenAI SDK method
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image', 
         contents: {
@@ -230,50 +235,41 @@ export const transformImage = async (
       throw new Error("لم يتم إرجاع أي صورة من النموذج (رد فارغ).");
 
     } catch (error: any) {
-      console.warn(`Attempt ${attempt + 1} failed:`, error);
+      console.error(`Gemini API Error (Attempt ${attempt + 1}):`, error);
       lastError = error;
       
       const errorMsg = (error.message || error.toString()).toLowerCase();
       
-      // Handle Quota/Overloaded/Network Errors
+      // STOP RETRYING on these errors. They are fatal.
+      if (errorMsg.includes("400") || errorMsg.includes("invalid argument")) {
+         throw new Error("⚠️ الصورة المرسلة غير مدعومة أو كبيرة جداً. يرجى تجربة صورة أخرى.");
+      }
+      if (errorMsg.includes("403") || errorMsg.includes("permission denied")) {
+         throw new Error("⚠️ مشكلة في الصلاحيات. قد يكون مفتاح API محظوراً أو غير مفعل في هذا النطاق.");
+      }
+      if (errorMsg.includes("404") || errorMsg.includes("not found")) {
+         throw new Error("⚠️ النموذج المطلوب غير متوفر حالياً.");
+      }
+      if (errorMsg.includes("safety") || errorMsg.includes("blocked")) {
+        throw new Error("⚠️ تم حظر الصورة لسبب أمني (Safety Filter).");
+      }
+
+      // Only retry on actual server overload or network glitches
       if (
         errorMsg.includes("429") || 
         errorMsg.includes("quota") || 
-        errorMsg.includes("exhausted") || 
         errorMsg.includes("503") || 
         errorMsg.includes("overloaded") ||
-        errorMsg.includes("fetch") || // Retry on network glitches too
-        errorMsg.includes("network")
+        errorMsg.includes("fetch failed") // CORS or Network drop
       ) {
         if (attempt === MAX_RETRIES - 1) break;
         
-        let waitTimeMs = Math.min(20000, 2000 * Math.pow(2, attempt)); 
-        waitTimeMs += Math.random() * 1000;
-        
-        const simulatedQueuePos = Math.max(1, 15 - Math.floor(attempt * 2));
-        let remainingSeconds = Math.ceil(waitTimeMs / 1000);
-
-        while (remainingSeconds > 0) {
-          if (onProgress) {
-             onProgress(`⚠️ الخادم مشغول.. المحاولة ${attempt + 1} من ${MAX_RETRIES} (انتظار ${remainingSeconds}ث)`);
-          }
-          await delay(1000);
-          remainingSeconds--;
-        }
+        let waitTimeMs = 2000 * Math.pow(2, attempt); 
+        await delay(waitTimeMs);
         continue;
       }
 
-      // Fatal Errors
-      if (errorMsg.includes("404") || errorMsg.includes("not_found")) {
-         throw new Error("⚠️ خطأ 404: النموذج غير موجود أو مفتاح API غير صالح.");
-      }
-      if (errorMsg.includes("safety") || errorMsg.includes("blocked")) {
-        throw new Error("⚠️ تم حظر الصورة لسبب أمني (Safety Filter). حاول استخدام صورة مختلفة.");
-      }
-      if (errorMsg.includes("400") || errorMsg.includes("invalid argument")) {
-         throw new Error("⚠️ خطأ في البيانات المرسلة (400). حاول استخدام صورة أصغر أو نوع مختلف.");
-      }
-
+      // Unknown error? Don't retry blindly.
       break; 
     }
   }
@@ -281,13 +277,14 @@ export const transformImage = async (
   // Final Diagnostics
   const finalMsg = (lastError.message || lastError.toString()).toLowerCase();
   
-  if (finalMsg.includes("429") || finalMsg.includes("exhausted") || finalMsg.includes("quota")) {
-    throw new Error("⚠️ تم تجاوز حد الاستخدام (Quota Exceeded). الخادم مشغول جداً حالياً.");
+  if (finalMsg.includes("429") || finalMsg.includes("quota")) {
+    throw new Error("⚠️ الخادم مشغول جداً (429 Too Many Requests). يرجى الانتظار دقيقة والماولة.");
   }
   
-  if (finalMsg.includes("failed to fetch") || finalMsg.includes("network")) {
-     throw new Error("⚠️ فشل الاتصال بالخادم. تأكد من الإنترنت، أو أن إعدادات الشبكة لا تحظر Google API.");
+  // Specific catch for the "Failed to fetch" which is usually CORS/SW/Privacy
+  if (finalMsg.includes("failed to fetch")) {
+     throw new Error("⚠️ فشل الاتصال (Network Error). قد يكون السبب إضافة حجب إعلانات، أو جدار ناري، أو ضعف في الإنترنت.");
   }
 
-  throw new Error(`حدث خطأ غير متوقع: ${lastError.message || "Unknown"}`);
+  throw new Error(`خطأ: ${lastError.message || "Unknown Error"}`);
 };

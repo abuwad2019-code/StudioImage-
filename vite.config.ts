@@ -7,13 +7,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '');
+  // Load env file based on `mode` in the current working directory.
+  // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
+  const env = loadEnv(mode, path.resolve(), '');
+
   return {
-    // Solution 2: Set base path to root to ensure assets load correctly
     base: '/',
     plugins: [react()],
     resolve: {
-      // Solution 1: Fix module resolution for @ imports
       alias: {
         '@': path.resolve(__dirname, './'),
       },
@@ -23,8 +24,9 @@ export default defineConfig(({ mode }) => {
       assetsDir: 'assets',
     },
     define: {
-      // This allows the code to use process.env.API_KEY as required
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      // Expose the API key safely to the client bundle
+      // We check for both API_KEY (system) and VITE_API_KEY (standard vite)
+      'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY),
     },
   };
 });
