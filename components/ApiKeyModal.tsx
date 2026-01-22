@@ -50,8 +50,8 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, currentKey, 
                  </div>
               </div>
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-white">المفتاح العام (الافتراضي)</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">مشترك بين جميع المستخدمين. قد يظهر خطأ "الخادم مشغول" في أوقات الذروة.</p>
+                <h3 className="font-bold text-gray-900 dark:text-white">الوضع المجاني (الافتراضي)</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">يعمل بشكل جيد ولكن قد يتأخر قليلاً أحياناً بسبب الضغط على الخوادم.</p>
               </div>
             </div>
 
@@ -62,22 +62,22 @@ const ApiKeyModal: React.FC<ApiKeyModalProps> = ({ isOpen, onClose, currentKey, 
                 </div>
                 <div>
                   <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    مفتاحك الخاص
-                    <span className="text-[10px] bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full">مجاني أو مدفوع</span>
+                    الوضع السريع (مفتاح خاص)
+                    <span className="text-[10px] bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full">نصح به</span>
                   </h3>
                   <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 mb-3">
-                    أنشئ مفتاح مجاني خاص بك. يمنحك هذا حصة خاصة (15 صورة/دقيقة) ويجنبك أخطاء الخادم المشغول تماماً.
+                    استخدم مفتاح Gemini الخاص بك للحصول على سرعة فائقة وبدون رسالة "الخادم مشغول".
                   </p>
                   <input
                     type="text"
                     value={keyInput}
                     onChange={(e) => setKeyInput(e.target.value)}
-                    placeholder="الصق مفتاح API الخاص بك هنا (AIza...)"
+                    placeholder="ضع مفتاح API هنا (AIza...)"
                     className="w-full text-sm p-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 focus:ring-2 focus:ring-amber-500 outline-none font-mono dir-ltr text-left"
                     dir="ltr"
                   />
-                  <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-primary-600 dark:text-primary-400 hover:underline mt-2 inline-block font-bold">
-                    اضغط هنا للحصول على مفتاح مجاني من Google →
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-xs text-primary-600 dark:text-primary-400 hover:underline mt-2 inline-block">
+                    احصل على مفتاح مجاني من Google →
                   </a>
                 </div>
               </div>

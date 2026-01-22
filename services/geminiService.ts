@@ -2,6 +2,9 @@
 import { GoogleGenAI } from "@google/genai";
 import { GenerationConfig, ClothingStyle, Country } from "../types";
 
+// Fix for Vercel Build: Explicitly declare process to avoid "Cannot find name 'process'" error during TSC
+declare const process: any;
+
 // Helper for delay
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -67,7 +70,7 @@ export const transformImage = async (
   const ai = new GoogleGenAI({ apiKey });
 
   // 2. Prepare Image
-  if (onProgress) onProgress(isFreeMode ? "جاري تجهيز الصورة (وضع عام)..." : "جاري المعالجة (مفتاح خاص)...");
+  if (onProgress) onProgress(isFreeMode ? "جاري تجهيز الصورة (وضع مجاني)..." : "جاري المعالجة السريعة...");
   
   let processedBase64 = base64Image;
   let mimeType = 'image/jpeg';
@@ -155,7 +158,7 @@ export const transformImage = async (
   };
 
   if (isFreeMode) {
-    // FREE MODE (Shared Key): Retry Logic + Delays
+    // FREE MODE: Retry Logic + Delays
     const maxRetries = 2;
     for (let i = 0; i <= maxRetries; i++) {
       try {
@@ -175,17 +178,8 @@ export const transformImage = async (
       }
     }
   } else {
-    // CUSTOM MODE (User's Free or Paid Key): Direct fast execution
-    // Users with their own free key rarely hit limits alone, so we skip the slow retry logic
-    try {
-        return await generate();
-    } catch (error: any) {
-        const msg = error.message?.toLowerCase() || "";
-        if (msg.includes("429")) {
-            throw new Error("تجاوزت حد الاستخدام المسموح لمفتاحك (15 صورة/دقيقة للمجاني).");
-        }
-        throw error;
-    }
+    // PAID MODE: Direct fast execution
+    return await generate();
   }
   
   throw new Error("Unexpected end of function");
