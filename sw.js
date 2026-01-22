@@ -1,6 +1,7 @@
 
 // sw.js - Optimized for AI Production Environment
-const CACHE_NAME = 'studio-v12-stable';
+// Updated Cache Name to force refresh
+const CACHE_NAME = 'studio-v13-hotfix-429';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -14,7 +15,7 @@ const STATIC_ASSETS = [
 const GOOGLE_API_REGEX = /googleapis\.com|generativelanguage|google\.ai/;
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  self.skipWaiting(); // Force new SW to take control immediately
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
@@ -23,7 +24,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([
-      self.clients.claim(),
+      self.clients.claim(), // Become available to all pages immediately
       caches.keys().then((keys) => Promise.all(
         keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
       ))

@@ -5,7 +5,7 @@ import { GenerationConfig, ClothingStyle, Country } from "../types";
 // Helper for waiting
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.8): Promise<string> => {
+const compressImage = (base64Str: string, maxWidth = 800, quality = 0.6): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
@@ -15,7 +15,9 @@ const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.8): Promi
       let width = img.width;
       let height = img.height;
 
-      // Smart resize logic - maintain aspect ratio
+      // Aggressive resize logic
+      // Reducing to 800px max width/height significantly reduces payload size
+      // which is critical for avoiding 429/Timeout errors on free tier.
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width);
         width = maxWidth;
@@ -57,14 +59,16 @@ export const transformImage = async (
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // 2. Optimize Image Size
-  if (onProgress) onProgress("جاري تحسين حجم الصورة...");
+  // 2. Aggressive Image Optimization
+  if (onProgress) onProgress("جاري ضغط الصورة لسرعة الإرسال...");
   
   let processedBase64 = base64Image;
   let mimeType = 'image/jpeg';
   
   try {
-    processedBase64 = await compressImage(base64Image, 1024, 0.8);
+    // Force aggressive compression: 800px max, 60% quality
+    // This makes the payload very light for the API.
+    processedBase64 = await compressImage(base64Image, 800, 0.6);
   } catch (e) {
     console.warn("Image compression failed, using original", e);
   }
@@ -108,7 +112,8 @@ export const transformImage = async (
 
     if (config.militaryOptions.hasBeret) {
       if (config.militaryOptions.beretImage) {
-        let beretBase64 = await compressImage(config.militaryOptions.beretImage, 256, 0.7);
+        // Compress beret strongly too
+        let beretBase64 = await compressImage(config.militaryOptions.beretImage, 200, 0.6);
         parts.push({ text: "Reference Beret:" }, { inlineData: { mimeType: 'image/jpeg', data: beretBase64.split(',')[1] } });
         extraInstructions += " Place the provided beret ON TOP of the subject's head naturally.";
       } else {
@@ -117,7 +122,8 @@ export const transformImage = async (
     }
 
     if (config.militaryOptions.hasRank && config.militaryOptions.rankImage) {
-      let rankBase64 = await compressImage(config.militaryOptions.rankImage, 256, 0.7);
+      // Compress rank strongly too
+      let rankBase64 = await compressImage(config.militaryOptions.rankImage, 200, 0.6);
       parts.push({ text: "Reference Rank:" }, { inlineData: { mimeType: 'image/jpeg', data: rankBase64.split(',')[1] } });
       extraInstructions += " Composite the provided rank insignia onto the uniform shoulders.";
     }
@@ -129,13 +135,19 @@ export const transformImage = async (
     ${extraInstructions} ${config.promptModifier || ''}
     Output ONLY the image.`;
 
-  // 4. Retry Logic Loop
-  const MAX_RETRIES = 2;
+  // 4. Enhanced Retry Logic with Exponential Backoff
+  const MAX_RETRIES = 3; // Increased to 3 retries (4 attempts total)
   
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      if (attempt === 0 && onProgress) onProgress("جاري المعالجة (Gemini AI)...");
-      if (attempt > 0 && onProgress) onProgress(`الخادم مشغول، محاولة ${attempt} من ${MAX_RETRIES}...`);
+      if (attempt === 0) {
+        if (onProgress) onProgress("جاري المعالجة (Gemini AI)...");
+      } else {
+        // Extended wait times: 4s, 8s, 12s
+        const waitTime = 4000 * attempt;
+        if (onProgress) onProgress(`الخادم مشغول (429). إعادة المحاولة ${attempt} من ${MAX_RETRIES} بعد ${waitTime/1000} ثوانٍ...`);
+        await delay(waitTime);
+      }
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image', 
@@ -153,20 +165,20 @@ export const transformImage = async (
       console.error(`Attempt ${attempt} failed:`, msg);
 
       // Handle Invalid Key explicitly
-      if (msg.includes("key") || msg.includes("api_key") || msg.includes("403") || msg.includes("400")) {
-        throw new Error("مفتاح API غير صالح أو غير مفعل. تأكد من إعداد VITE_API_KEY في Vercel.");
+      if (msg.includes("key") || msg.includes("api_key") || msg.includes("403")) {
+        throw new Error("مفتاح API غير صالح. تأكد من إعداد VITE_API_KEY في Vercel.");
       }
 
-      // Handle Quota/Busy
-      if (msg.includes("429") || msg.includes("exhausted") || msg.includes("busy") || msg.includes("overloaded")) {
+      // Handle Quota/Busy (429 or 503)
+      // Note: Sometimes the SDK throws 'GoogleGenerativeAIError' which contains the status code
+      if (msg.includes("429") || msg.includes("503") || msg.includes("busy") || msg.includes("exhausted") || msg.includes("overloaded") || msg.includes("fetch failed")) {
         if (attempt < MAX_RETRIES) {
-          await delay(2000 * (attempt + 1));
-          continue;
+          continue; // Loop again to retry with delay
         }
-        throw new Error("الخادم مشغول جداً حالياً (429). يرجى الانتظار دقيقة ثم المحاولة.");
+        throw new Error("الخادم مشغول جداً (429). انتهت المحاولات. يرجى الانتظار دقيقتين قبل المحاولة مجدداً.");
       }
       
-      // Other errors
+      // Other errors - throw immediately
       throw error;
     }
   }
