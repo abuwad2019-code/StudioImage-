@@ -2,8 +2,11 @@
 {
   "name": "formal-photo-gemini",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.5",
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
