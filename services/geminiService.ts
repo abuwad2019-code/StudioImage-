@@ -2,9 +2,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { GenerationConfig, ClothingStyle, Country } from "../types";
 
+// Helper for waiting
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.75): Promise<string> => {
+const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.8): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
@@ -14,6 +15,7 @@ const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.75): Prom
       let width = img.width;
       let height = img.height;
 
+      // Smart resize logic - maintain aspect ratio
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width);
         width = maxWidth;
@@ -30,6 +32,7 @@ const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.75): Prom
         reject(new Error("Canvas context error"));
         return;
       }
+      // White background base
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
@@ -44,29 +47,31 @@ export const transformImage = async (
   config: GenerationConfig,
   onProgress?: (message: string) => void
 ): Promise<string> => {
-  if (onProgress) onProgress("جاري تجهيز الصورة (تحسين الحجم)...");
+  // 1. Retrieve API Key
+  const apiKey = process.env.API_KEY;
 
-  // Multi-source API Key retrieval
-  const apiKey = process.env.API_KEY || (import.meta as any).env?.VITE_API_KEY;
-
-  if (!apiKey || apiKey === 'undefined') {
-    throw new Error("مفتاح API غير معرف. يرجى مراجعة إعدادات Vercel (VITE_API_KEY).");
+  if (!apiKey || apiKey === 'undefined' || apiKey === '') {
+    console.error("API Key is missing. Make sure VITE_API_KEY is set in Vercel Environment Variables.");
+    throw new Error("مفتاح الربط (API Key) مفقود. يرجى التأكد من إعداد VITE_API_KEY في Vercel.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
+  // 2. Optimize Image Size
+  if (onProgress) onProgress("جاري تحسين حجم الصورة...");
+  
   let processedBase64 = base64Image;
   let mimeType = 'image/jpeg';
   
   try {
-    // Reduced to 1024px to be "lightweight" for the API to avoid 429 Quota issues
-    processedBase64 = await compressImage(base64Image, 1024, 0.75);
+    processedBase64 = await compressImage(base64Image, 1024, 0.8);
   } catch (e) {
-    console.warn("Compression fallback", e);
+    console.warn("Image compression failed, using original", e);
   }
 
   const cleanBase64 = processedBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
 
+  // 3. Construct Prompt
   const getStyleDescription = (s: ClothingStyle) => {
     switch (s) {
       case 'civilian_suit_black': return "a professional formal black business suit with a white shirt and tie";
@@ -124,10 +129,13 @@ export const transformImage = async (
     ${extraInstructions} ${config.promptModifier || ''}
     Output ONLY the image.`;
 
+  // 4. Retry Logic Loop
   const MAX_RETRIES = 2;
+  
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      if (onProgress) onProgress(attempt === 0 ? "جاري المعالجة بالذكاء الاصطناعي..." : `محاولة بديلة ${attempt}...`);
+      if (attempt === 0 && onProgress) onProgress("جاري المعالجة (Gemini AI)...");
+      if (attempt > 0 && onProgress) onProgress(`الخادم مشغول، محاولة ${attempt} من ${MAX_RETRIES}...`);
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image', 
@@ -138,20 +146,30 @@ export const transformImage = async (
       for (const part of response.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
       }
-      throw new Error("لم يتم إرجاع صورة من الخادم.");
+      throw new Error("لم يتم إرجاع بيانات صورة من الخادم.");
 
     } catch (error: any) {
       const msg = error.message?.toLowerCase() || "";
-      if (msg.includes("429") || msg.includes("exhausted") || msg.includes("busy")) {
+      console.error(`Attempt ${attempt} failed:`, msg);
+
+      // Handle Invalid Key explicitly
+      if (msg.includes("key") || msg.includes("api_key") || msg.includes("403") || msg.includes("400")) {
+        throw new Error("مفتاح API غير صالح أو غير مفعل. تأكد من إعداد VITE_API_KEY في Vercel.");
+      }
+
+      // Handle Quota/Busy
+      if (msg.includes("429") || msg.includes("exhausted") || msg.includes("busy") || msg.includes("overloaded")) {
         if (attempt < MAX_RETRIES) {
-          if (onProgress) onProgress("الخادم مشغول قليلاً.. سأحاول مجدداً بعد لحظات");
-          await delay(3000 * (attempt + 1));
+          await delay(2000 * (attempt + 1));
           continue;
         }
-        throw new Error("⏳ ضغط كبير على خوادم Gemini المجانية حالياً. يرجى المحاولة بعد دقيقة واحدة.");
+        throw new Error("الخادم مشغول جداً حالياً (429). يرجى الانتظار دقيقة ثم المحاولة.");
       }
+      
+      // Other errors
       throw error;
     }
   }
-  throw new Error("فشلت جميع المحاولات للاتصال بالخادم.");
+  
+  throw new Error("فشلت المعالجة بعد عدة محاولات.");
 };
