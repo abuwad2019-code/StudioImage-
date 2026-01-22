@@ -8,6 +8,34 @@ declare const process: any;
 // Helper for delay
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper to clean error messages
+const getFriendlyErrorMessage = (error: any): string => {
+  const msg = error?.message?.toLowerCase() || JSON.stringify(error).toLowerCase();
+
+  if (msg.includes("429") || msg.includes("resource_exhausted") || msg.includes("quota")) {
+    return "الخادم مشغول جداً حالياً (429). يرجى المحاولة بعد قليل أو استخدام مفتاح خاص.";
+  }
+  if (msg.includes("safety") || msg.includes("blocked") || msg.includes("finishreason")) {
+    return "لم تتم معالجة الصورة لأنها قد تخالف سياسات الأمان (محتوى غير لائق أو وجوه غير واضحة).";
+  }
+  if (msg.includes("400") || msg.includes("invalid_argument")) {
+    return "الصورة المرسلة غير صالحة أو التنسيق غير مدعوم. حاول استخدام صورة أخرى.";
+  }
+  if (msg.includes("apikey") || msg.includes("api_key") || msg.includes("403")) {
+    return "مفتاح API غير صالح أو انتهت صلاحيته. يرجى التحقق من الإعدادات.";
+  }
+  if (msg.includes("fetch") || msg.includes("network")) {
+    return "مشكلة في الاتصال بالإنترنت. يرجى التحقق من الشبكة.";
+  }
+  
+  // Truncate very long technical errors
+  if (msg.length > 100) {
+    return "حدث خطأ غير متوقع أثناء المعالجة. يرجى المحاولة مرة أخرى.";
+  }
+
+  return "حدث خطأ غير معروف. يرجى المحاولة لاحقاً.";
+};
+
 const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.8): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -145,16 +173,21 @@ export const transformImage = async (
   // 4. Execution Logic (Hybrid)
   
   const generate = async () => {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image', 
-      contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, ...parts, { text: prompt }] },
-      config: { imageConfig: { aspectRatio: config.ratio } },
-    });
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image', 
+        contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, ...parts, { text: prompt }] },
+        config: { imageConfig: { aspectRatio: config.ratio } },
+      });
 
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
+      }
+      throw new Error("لم يتم استلام صورة من الخادم.");
+    } catch (err: any) {
+      // Re-throw with clean message immediately for direct calls
+      throw new Error(getFriendlyErrorMessage(err));
     }
-    throw new Error("لم يتم استلام صورة من الخادم.");
   };
 
   if (isFreeMode) {
@@ -168,13 +201,16 @@ export const transformImage = async (
         }
         return await generate();
       } catch (error: any) {
-        const msg = error.message?.toLowerCase() || "";
-        // If it's a 429 (Too Many Requests) and we have retries left, loop again
-        if ((msg.includes("429") || msg.includes("busy")) && i < maxRetries) {
-          continue; 
-        }
-        // If it's the last retry or another error, throw it
+        // If it's the last retry, throw the CLEAN error
         if (i === maxRetries) throw error;
+        
+        // If it's a 429, continue loop. Otherwise, if it's a fatal error (like 400), throw immediately
+        const msg = error.message; 
+        if (msg.includes("429") || msg.includes("مشغول")) {
+          continue;
+        } else {
+          throw error;
+        }
       }
     }
   } else {

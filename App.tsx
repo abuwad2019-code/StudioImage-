@@ -182,14 +182,27 @@ const App: React.FC = () => {
         </div>
 
         {state.error && (
-          <div className="mb-6 bg-red-50 dark:bg-red-900/20 border-r-4 border-red-500 p-4 rounded-md shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 text-red-700 dark:text-red-400">
-            <div className="flex items-center gap-3">
-              <AlertCircle size={24} className="shrink-0" />
-              <p className="text-sm font-medium">{state.error}</p>
+          <div className="mb-8 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-xl p-4 shadow-sm animate-in fade-in slide-in-from-top-2">
+            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+              <div className="flex gap-3 overflow-hidden">
+                <div className="bg-red-100 dark:bg-red-900/50 p-2 rounded-full shrink-0">
+                  <AlertCircle size={24} className="text-red-600 dark:text-red-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-red-800 dark:text-red-300 text-sm mb-0.5">عذراً، حدث خطأ</h4>
+                  <p className="text-sm text-red-700 dark:text-red-400 leading-relaxed break-words whitespace-normal">
+                    {state.error}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={handleGenerate} 
+                className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 bg-white dark:bg-gray-800 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400 px-5 py-2.5 rounded-lg text-sm font-bold transition-colors shadow-sm"
+              >
+                <RefreshCw size={16} />
+                <span>محاولة مرة أخرى</span>
+              </button>
             </div>
-            <button onClick={handleGenerate} className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-red-200 px-4 py-2 rounded-lg text-sm font-bold">
-              <RefreshCw size={16} /> محاولة ثانية
-            </button>
           </div>
         )}
 
