@@ -40,7 +40,7 @@ export default function Header({ isDarkMode, toggleTheme, isInstallable, onInsta
             title="إعدادات المفتاح"
           >
             <Key size={16} className={hasCustomKey ? "fill-amber-500 text-amber-600" : ""} />
-            <span className="hidden sm:inline">{hasCustomKey ? 'وضع خاص' : 'مجاني'}</span>
+            <span className="hidden sm:inline">{hasCustomKey ? 'مفتاحي الخاص' : 'مفتاح عام'}</span>
           </button>
 
           {/* Dark Mode Toggle */}

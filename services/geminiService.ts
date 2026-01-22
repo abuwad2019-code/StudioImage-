@@ -67,7 +67,7 @@ export const transformImage = async (
   const ai = new GoogleGenAI({ apiKey });
 
   // 2. Prepare Image
-  if (onProgress) onProgress(isFreeMode ? "جاري تجهيز الصورة (وضع مجاني)..." : "جاري المعالجة السريعة...");
+  if (onProgress) onProgress(isFreeMode ? "جاري تجهيز الصورة (وضع عام)..." : "جاري المعالجة (مفتاح خاص)...");
   
   let processedBase64 = base64Image;
   let mimeType = 'image/jpeg';
@@ -155,7 +155,7 @@ export const transformImage = async (
   };
 
   if (isFreeMode) {
-    // FREE MODE: Retry Logic + Delays
+    // FREE MODE (Shared Key): Retry Logic + Delays
     const maxRetries = 2;
     for (let i = 0; i <= maxRetries; i++) {
       try {
@@ -175,8 +175,17 @@ export const transformImage = async (
       }
     }
   } else {
-    // PAID MODE: Direct fast execution
-    return await generate();
+    // CUSTOM MODE (User's Free or Paid Key): Direct fast execution
+    // Users with their own free key rarely hit limits alone, so we skip the slow retry logic
+    try {
+        return await generate();
+    } catch (error: any) {
+        const msg = error.message?.toLowerCase() || "";
+        if (msg.includes("429")) {
+            throw new Error("تجاوزت حد الاستخدام المسموح لمفتاحك (15 صورة/دقيقة للمجاني).");
+        }
+        throw error;
+    }
   }
   
   throw new Error("Unexpected end of function");
