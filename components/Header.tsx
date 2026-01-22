@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { User, Download, Moon, Sun, Key } from 'lucide-react';
+import { User, Download, Moon, Sun, Key, Crown } from 'lucide-react';
 
 interface HeaderProps {
   isDarkMode?: boolean;
@@ -34,13 +34,13 @@ export default function Header({ isDarkMode, toggleTheme, isInstallable, onInsta
             onClick={onOpenSettings}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
               hasCustomKey 
-                ? 'bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' 
+                ? 'bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700 shadow-sm' 
                 : 'bg-gray-100 text-gray-600 border border-transparent hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
             }`}
-            title="إعدادات المفتاح"
+            title="إعدادات الخادم"
           >
-            <Key size={16} className={hasCustomKey ? "fill-amber-500 text-amber-600" : ""} />
-            <span className="hidden sm:inline">{hasCustomKey ? 'وضع خاص' : 'مجاني'}</span>
+            {hasCustomKey ? <Crown size={16} className="fill-amber-500 text-amber-600" /> : <Key size={16} />}
+            <span className="hidden sm:inline">{hasCustomKey ? 'نسخة PRO' : 'مجاني'}</span>
           </button>
 
           {/* Dark Mode Toggle */}
