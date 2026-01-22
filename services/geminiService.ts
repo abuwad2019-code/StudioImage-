@@ -2,10 +2,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { GenerationConfig, ClothingStyle, Country } from "../types";
 
-// Helper for waiting
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Helper for delay
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const compressImage = (base64Str: string, maxWidth = 800, quality = 0.6): Promise<string> => {
+const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.8): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
@@ -15,9 +15,7 @@ const compressImage = (base64Str: string, maxWidth = 800, quality = 0.6): Promis
       let width = img.width;
       let height = img.height;
 
-      // Aggressive resize logic
-      // Reducing to 800px max width/height significantly reduces payload size
-      // which is critical for avoiding 429/Timeout errors on free tier.
+      // Maintain quality but ensure reasonable size
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width);
         width = maxWidth;
@@ -47,35 +45,43 @@ const compressImage = (base64Str: string, maxWidth = 800, quality = 0.6): Promis
 export const transformImage = async (
   base64Image: string,
   config: GenerationConfig,
+  customApiKey: string | null,
   onProgress?: (message: string) => void
 ): Promise<string> => {
-  // 1. Retrieve API Key
-  const apiKey = process.env.API_KEY;
+  
+  // 1. Determine Key and Mode
+  let apiKey = process.env.API_KEY;
+  let isFreeMode = true;
+
+  if (customApiKey && customApiKey.trim().length > 10) {
+    apiKey = customApiKey.trim();
+    isFreeMode = false;
+  }
 
   if (!apiKey || apiKey === 'undefined' || apiKey === '') {
-    console.error("API Key is missing. Make sure VITE_API_KEY is set in Vercel Environment Variables.");
-    throw new Error("مفتاح الربط (API Key) مفقود. يرجى التأكد من إعداد VITE_API_KEY في Vercel.");
+    throw new Error(isFreeMode 
+      ? "مفتاح النظام مفقود. يرجى إدخال مفتاح خاص من الإعدادات." 
+      : "المفتاح المدخل غير صالح.");
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // 2. Aggressive Image Optimization
-  if (onProgress) onProgress("جاري ضغط الصورة لسرعة الإرسال...");
+  // 2. Prepare Image
+  if (onProgress) onProgress(isFreeMode ? "جاري تجهيز الصورة (وضع مجاني)..." : "جاري المعالجة السريعة...");
   
   let processedBase64 = base64Image;
   let mimeType = 'image/jpeg';
   
   try {
-    // Force aggressive compression: 800px max, 60% quality
-    // This makes the payload very light for the API.
-    processedBase64 = await compressImage(base64Image, 800, 0.6);
+    // 1024px is a good balance for both
+    processedBase64 = await compressImage(base64Image, 1024, 0.85);
   } catch (e) {
-    console.warn("Image compression failed, using original", e);
+    console.warn("Compression failed", e);
   }
 
   const cleanBase64 = processedBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
 
-  // 3. Construct Prompt
+  // 3. Construct Prompt (Same logic as before)
   const getStyleDescription = (s: ClothingStyle) => {
     switch (s) {
       case 'civilian_suit_black': return "a professional formal black business suit with a white shirt and tie";
@@ -112,8 +118,7 @@ export const transformImage = async (
 
     if (config.militaryOptions.hasBeret) {
       if (config.militaryOptions.beretImage) {
-        // Compress beret strongly too
-        let beretBase64 = await compressImage(config.militaryOptions.beretImage, 200, 0.6);
+        let beretBase64 = await compressImage(config.militaryOptions.beretImage, 300, 0.8);
         parts.push({ text: "Reference Beret:" }, { inlineData: { mimeType: 'image/jpeg', data: beretBase64.split(',')[1] } });
         extraInstructions += " Place the provided beret ON TOP of the subject's head naturally.";
       } else {
@@ -122,8 +127,7 @@ export const transformImage = async (
     }
 
     if (config.militaryOptions.hasRank && config.militaryOptions.rankImage) {
-      // Compress rank strongly too
-      let rankBase64 = await compressImage(config.militaryOptions.rankImage, 200, 0.6);
+      let rankBase64 = await compressImage(config.militaryOptions.rankImage, 300, 0.8);
       parts.push({ text: "Reference Rank:" }, { inlineData: { mimeType: 'image/jpeg', data: rankBase64.split(',')[1] } });
       extraInstructions += " Composite the provided rank insignia onto the uniform shoulders.";
     }
@@ -135,53 +139,45 @@ export const transformImage = async (
     ${extraInstructions} ${config.promptModifier || ''}
     Output ONLY the image.`;
 
-  // 4. Enhanced Retry Logic with Exponential Backoff
-  const MAX_RETRIES = 3; // Increased to 3 retries (4 attempts total)
+  // 4. Execution Logic (Hybrid)
   
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      if (attempt === 0) {
-        if (onProgress) onProgress("جاري المعالجة (Gemini AI)...");
-      } else {
-        // Extended wait times: 4s, 8s, 12s
-        const waitTime = 4000 * attempt;
-        if (onProgress) onProgress(`الخادم مشغول (429). إعادة المحاولة ${attempt} من ${MAX_RETRIES} بعد ${waitTime/1000} ثوانٍ...`);
-        await delay(waitTime);
-      }
+  const generate = async () => {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image', 
+      contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, ...parts, { text: prompt }] },
+      config: { imageConfig: { aspectRatio: config.ratio } },
+    });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image', 
-        contents: { parts: [{ inlineData: { mimeType, data: cleanBase64 } }, ...parts, { text: prompt }] },
-        config: { imageConfig: { aspectRatio: config.ratio } },
-      });
-
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
-      }
-      throw new Error("لم يتم إرجاع بيانات صورة من الخادم.");
-
-    } catch (error: any) {
-      const msg = error.message?.toLowerCase() || "";
-      console.error(`Attempt ${attempt} failed:`, msg);
-
-      // Handle Invalid Key explicitly
-      if (msg.includes("key") || msg.includes("api_key") || msg.includes("403")) {
-        throw new Error("مفتاح API غير صالح. تأكد من إعداد VITE_API_KEY في Vercel.");
-      }
-
-      // Handle Quota/Busy (429 or 503)
-      // Note: Sometimes the SDK throws 'GoogleGenerativeAIError' which contains the status code
-      if (msg.includes("429") || msg.includes("503") || msg.includes("busy") || msg.includes("exhausted") || msg.includes("overloaded") || msg.includes("fetch failed")) {
-        if (attempt < MAX_RETRIES) {
-          continue; // Loop again to retry with delay
-        }
-        throw new Error("الخادم مشغول جداً (429). انتهت المحاولات. يرجى الانتظار دقيقتين قبل المحاولة مجدداً.");
-      }
-      
-      // Other errors - throw immediately
-      throw error;
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData?.data) return `data:image/png;base64,${part.inlineData.data}`;
     }
+    throw new Error("لم يتم استلام صورة من الخادم.");
+  };
+
+  if (isFreeMode) {
+    // FREE MODE: Retry Logic + Delays
+    const maxRetries = 2;
+    for (let i = 0; i <= maxRetries; i++) {
+      try {
+        if (i > 0) {
+           if (onProgress) onProgress(`الخادم مشغول، محاولة ${i}/${maxRetries}...`);
+           await wait(3000 * i); // Backoff: 3s, then 6s
+        }
+        return await generate();
+      } catch (error: any) {
+        const msg = error.message?.toLowerCase() || "";
+        // If it's a 429 (Too Many Requests) and we have retries left, loop again
+        if ((msg.includes("429") || msg.includes("busy")) && i < maxRetries) {
+          continue; 
+        }
+        // If it's the last retry or another error, throw it
+        if (i === maxRetries) throw error;
+      }
+    }
+  } else {
+    // PAID MODE: Direct fast execution
+    return await generate();
   }
   
-  throw new Error("فشلت المعالجة بعد عدة محاولات.");
+  throw new Error("Unexpected end of function");
 };

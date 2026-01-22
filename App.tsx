@@ -5,9 +5,10 @@ import ImageUpload from './components/ImageUpload';
 import Controls from './components/Controls';
 import Preview from './components/Preview';
 import InfoTicker from './components/InfoTicker';
+import ApiKeyModal from './components/ApiKeyModal'; // New Import
 import { AppState, AspectRatio, GenerationConfig, MilitaryOptions } from './types';
 import { transformImage } from './services/geminiService';
-import { AlertCircle, RefreshCw, WifiOff, Wifi, ExternalLink, MessageCircle, Download, Share, X } from 'lucide-react';
+import { AlertCircle, RefreshCw, WifiOff, ExternalLink, MessageCircle, Share, X, Zap } from 'lucide-react';
 
 const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -17,6 +18,9 @@ const App: React.FC = () => {
   const [showIOSInstructions, setShowIOSInstructions] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   
+  // Settings Modal State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
   const [state, setState] = useState<AppState>({
     isLoading: false,
     loadingMessage: undefined,
@@ -36,9 +40,22 @@ const App: React.FC = () => {
         rankImage: null
       }
     },
+    settings: {
+      useCustomKey: false,
+      customApiKey: ''
+    }
   });
 
+  // Load Settings from LocalStorage
   useEffect(() => {
+    const savedKey = localStorage.getItem('user_api_key');
+    if (savedKey) {
+      setState(prev => ({
+        ...prev,
+        settings: { useCustomKey: true, customApiKey: savedKey }
+      }));
+    }
+
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) setIsDarkMode(savedTheme === 'dark');
     else setIsDarkMode(new Date().getHours() >= 18 || new Date().getHours() < 6);
@@ -82,6 +99,16 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSaveApiKey = (key: string) => {
+    if (key.trim()) {
+      localStorage.setItem('user_api_key', key.trim());
+      setState(prev => ({ ...prev, settings: { useCustomKey: true, customApiKey: key.trim() } }));
+    } else {
+      localStorage.removeItem('user_api_key');
+      setState(prev => ({ ...prev, settings: { useCustomKey: false, customApiKey: '' } }));
+    }
+  };
+
   const handleImageSelect = (base64: string) => {
     setState(prev => ({ ...prev, error: null, image: { original: base64, generated: null } }));
   };
@@ -109,13 +136,20 @@ const App: React.FC = () => {
       return;
     }
     if (!state.image?.original) return;
+    
     setState(prev => ({ ...prev, isLoading: true, error: null }));
+    
     try {
+      // Pass the custom key logic to the service
+      const activeKey = state.settings.useCustomKey ? state.settings.customApiKey : null;
+      
       const generatedImage = await transformImage(
         state.image.original,
         state.config,
+        activeKey,
         (msg) => setState(prev => ({ ...prev, loadingMessage: msg }))
       );
+      
       setState(prev => ({ ...prev, isLoading: false, image: { original: prev.image!.original, generated: generatedImage } }));
     } catch (error: any) {
       setState(prev => ({ ...prev, isLoading: false, error: error.message || "حدث خطأ أثناء الاتصال بالخادم" }));
@@ -124,7 +158,15 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-6 flex flex-col transition-colors duration-200">
-      <Header isDarkMode={isDarkMode} toggleTheme={() => setIsDarkMode(!isDarkMode)} isInstallable={showInstallButton} onInstallClick={handleInstallClick} />
+      <Header 
+        isDarkMode={isDarkMode} 
+        toggleTheme={() => setIsDarkMode(!isDarkMode)} 
+        isInstallable={showInstallButton} 
+        onInstallClick={handleInstallClick}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        hasCustomKey={state.settings.useCustomKey}
+      />
+      
       <InfoTicker />
 
       {!isOnline && (
@@ -154,9 +196,25 @@ const App: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-4 space-y-6 order-2 lg:order-1">
              <Controls config={state.config} onConfigChange={handleConfigChange} onMilitaryOptionChange={handleMilitaryOptionChange} onGenerate={handleGenerate} isLoading={state.isLoading} loadingMessage={state.loadingMessage} hasImage={!!state.image} />
-             <div className="bg-blue-50 dark:bg-blue-900/20 p-5 rounded-xl border border-blue-100 text-sm text-blue-800 dark:text-blue-200">
-               <h4 className="font-bold mb-2">💡 ملاحظة تقنية</h4>
-               <p className="opacity-80">نستخدم النسخة المجانية من Gemini، إذا واجهت رسالة "الخادم مشغول"، فهذا يعني وجود ضغط عالمي على الخدمة. انتظر دقيقة واحدة فقط ثم حاول مجدداً.</p>
+             
+             <div 
+               onClick={() => setIsSettingsOpen(true)}
+               className={`p-5 rounded-xl border text-sm cursor-pointer transition-colors ${
+                 state.settings.useCustomKey 
+                 ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 text-amber-800 dark:text-amber-200'
+                 : 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 text-blue-800 dark:text-blue-200'
+               }`}
+             >
+               <h4 className="font-bold mb-2 flex items-center gap-2">
+                 {state.settings.useCustomKey ? <Zap size={16} className="text-amber-500"/> : "💡 ملاحظة تقنية"}
+                 {state.settings.useCustomKey ? "وضع الأداء العالي مفعل" : "نصيحة للأداء"}
+               </h4>
+               <p className="opacity-80">
+                 {state.settings.useCustomKey 
+                   ? "أنت تستخدم مفتاحك الخاص. السرعة الآن قصوى ولا يوجد حدود للانتظار."
+                   : "أنت تستخدم الوضع المجاني. إذا واجهت رسالة 'الخادم مشغول'، يمكنك إضافة مفتاحك الخاص مجاناً للحصول على سرعة فائقة."
+                 }
+               </p>
              </div>
           </div>
           <div className="lg:col-span-8 order-1 lg:order-2">
@@ -184,6 +242,14 @@ const App: React.FC = () => {
           </a>
         </div>
       </footer>
+
+      {/* Settings Modal */}
+      <ApiKeyModal 
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        currentKey={state.settings.customApiKey}
+        onSave={handleSaveApiKey}
+      />
 
       {showIOSInstructions && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-sm p-4">

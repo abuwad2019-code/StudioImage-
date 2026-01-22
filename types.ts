@@ -1,3 +1,4 @@
+
 export interface ProcessedImage {
   original: string;
   generated: string | null;
@@ -49,10 +50,16 @@ export interface GenerationConfig {
   promptModifier: string;
 }
 
+export interface UserSettings {
+  useCustomKey: boolean;
+  customApiKey: string;
+}
+
 export interface AppState {
   isLoading: boolean;
   loadingMessage?: string; // Shows detailed status like queue position
   error: string | null;
   image: ProcessedImage | null;
   config: GenerationConfig;
+  settings: UserSettings;
 }
