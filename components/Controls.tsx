@@ -1,6 +1,7 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { AspectRatio, ClothingStyle, ClothingCategory, MilitaryOptions, Gender, Country } from '../types';
-import { Wand2, Check, Upload, Trash2, Shield, User, WifiOff, CheckCircle2, Loader2, HardHat } from 'lucide-react';
+import { Wand2, Check, Upload, Trash2, Shield, User, WifiOff, CheckCircle2, Loader2, HardHat, Clock } from 'lucide-react';
 
 interface ControlsProps {
   config: {
@@ -389,15 +390,18 @@ const Controls: React.FC<ControlsProps> = ({
           }`}
         >
           {isLoading ? (
-             <div className="flex flex-col items-center justify-center leading-tight">
+             <div className="flex flex-col items-center justify-center leading-tight w-full">
                 <div className="flex items-center gap-2">
                   <Loader2 size={24} className="animate-spin" />
                   <span>جاري المعالجة...</span>
                 </div>
                 {loadingMessage && (
-                  <span className="text-[10px] sm:text-xs opacity-90 mt-1 font-normal text-yellow-100 animate-pulse text-center">
-                     {loadingMessage}
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-2 bg-white/20 px-3 py-1 rounded-full animate-pulse">
+                     <Clock size={12} className="text-white"/>
+                     <span className="text-xs text-white font-medium text-center truncate max-w-xs sm:max-w-none">
+                        {loadingMessage}
+                     </span>
+                  </div>
                 )}
              </div>
           ) : !isOnline ? (

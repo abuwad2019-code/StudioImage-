@@ -12,8 +12,8 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const getFriendlyErrorMessage = (error: any): string => {
   const msg = error?.message?.toLowerCase() || JSON.stringify(error).toLowerCase();
 
-  if (msg.includes("429") || msg.includes("resource_exhausted") || msg.includes("quota")) {
-    return "الخادم مشغول جداً حالياً (429). يرجى المحاولة بعد قليل أو استخدام مفتاح خاص.";
+  if (msg.includes("429") || msg.includes("resource_exhausted") || msg.includes("quota") || msg.includes("overloaded")) {
+    return "SERVER_BUSY"; // Marker for logic, will be translated in UI if final failure
   }
   if (msg.includes("safety") || msg.includes("blocked") || msg.includes("finishreason")) {
     return "لم تتم معالجة الصورة لأنها قد تخالف سياسات الأمان (محتوى غير لائق أو وجوه غير واضحة).";
@@ -98,7 +98,7 @@ export const transformImage = async (
   const ai = new GoogleGenAI({ apiKey });
 
   // 2. Prepare Image
-  if (onProgress) onProgress(isFreeMode ? "جاري تجهيز الصورة (وضع مجاني)..." : "جاري المعالجة السريعة...");
+  if (onProgress) onProgress(isFreeMode ? "جاري الاتصال بالخادم..." : "جاري المعالجة السريعة...");
   
   let processedBase64 = base64Image;
   let mimeType = 'image/jpeg';
@@ -112,7 +112,7 @@ export const transformImage = async (
 
   const cleanBase64 = processedBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
 
-  // 3. Construct Prompt (Same logic as before)
+  // 3. Construct Prompt
   const getStyleDescription = (s: ClothingStyle) => {
     switch (s) {
       case 'civilian_suit_black': return "a professional formal black business suit with a white shirt and tie";
@@ -170,7 +170,7 @@ export const transformImage = async (
     ${extraInstructions} ${config.promptModifier || ''}
     Output ONLY the image.`;
 
-  // 4. Execution Logic (Hybrid)
+  // 4. Execution Logic (Hybrid with Queue Simulation)
   
   const generate = async () => {
     try {
@@ -185,30 +185,58 @@ export const transformImage = async (
       }
       throw new Error("لم يتم استلام صورة من الخادم.");
     } catch (err: any) {
-      // Re-throw with clean message immediately for direct calls
-      throw new Error(getFriendlyErrorMessage(err));
+      const friendlyMsg = getFriendlyErrorMessage(err);
+      // Pass the friendly code up
+      if (friendlyMsg === "SERVER_BUSY") throw new Error("SERVER_BUSY");
+      throw new Error(friendlyMsg);
     }
   };
 
   if (isFreeMode) {
-    // FREE MODE: Retry Logic + Delays
-    const maxRetries = 2;
-    for (let i = 0; i <= maxRetries; i++) {
+    // --- SMART QUEUE SIMULATION ---
+    // Instead of failing fast, we wait longer and retry more times.
+    const maxRetries = 10; // Max queue attempts
+    let delay = 3000; // Start with 3 seconds
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        if (i > 0) {
-           if (onProgress) onProgress(`الخادم مشغول، محاولة ${i}/${maxRetries}...`);
-           await wait(3000 * i); // Backoff: 3s, then 6s
+        // If this is a retry, show Queue UI
+        if (attempt > 1) {
+           if (onProgress) {
+             // Messages change to feel like a real queue
+             const messages = [
+               `الخادم مزدحم، أنت في قائمة الانتظار (محاولة ${attempt}/${maxRetries})...`,
+               `جاري البحث عن دور متاح في الخادم (${attempt}/${maxRetries})...`,
+               `يرجى الانتظار، اقترب دورك (${attempt}/${maxRetries})...`,
+             ];
+             const msgIndex = (attempt - 2) % messages.length;
+             onProgress(messages[msgIndex]);
+           }
+           
+           // Exponential Backoff with Jitter: Wait longer each time to let server cool down
+           // 3s, 4.5s, 6.75s, 10s ... capped at 15s
+           await wait(delay + Math.random() * 1000); 
+           delay = Math.min(delay * 1.5, 15000); 
         }
+
         return await generate();
+
       } catch (error: any) {
-        // If it's the last retry, throw the CLEAN error
-        if (i === maxRetries) throw error;
+        // If it's the absolute last attempt, fail with the message
+        if (attempt === maxRetries) {
+          if (error.message === "SERVER_BUSY") {
+            throw new Error("نعتذر، الخادم مشغول جداً حالياً. تم وضعك في قائمة الانتظار لكن انتهت المهلة. يرجى المحاولة لاحقاً أو استخدام مفتاح خاص.");
+          }
+          throw error;
+        }
         
-        // If it's a 429, continue loop. Otherwise, if it's a fatal error (like 400), throw immediately
-        const msg = error.message; 
-        if (msg.includes("429") || msg.includes("مشغول")) {
-          continue;
-        } else {
+        // If it's a BUSY error, Continue the loop (Queue)
+        if (error.message === "SERVER_BUSY") {
+          continue; 
+        } 
+        
+        // If it's another error (e.g., Policy blocked), fail immediately
+        else {
           throw error;
         }
       }
